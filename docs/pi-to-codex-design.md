@@ -1,6 +1,9 @@
 # SSSF：从 Pi 迁移到 Codex 的设计
 
-状态：设计稿，尚未实施。核对日期：2026-09-21。
+状态：迁移设计稿；M0 已完成，M1-M4 尚未实施。核对日期：2026-09-21。
+
+M0 的版本锁、真实能力验证、脱敏事件样本和未覆盖能力见
+[`codex-sdk-m0-report.md`](codex-sdk-m0-report.md)。
 
 本文中的“迁移 agent”指替换 ADW 节点使用的 coding-agent runtime。Python 继续负责工作流、重试、验收和 Git 提交；planner、builder、scout、reviewer、documenter 保留各自职责。
 
@@ -8,7 +11,8 @@
 
 用户明确不使用 Pi，因此不保留 Pi 后端、配置兼容层、历史事件解析器、会话转换、自动降级或回滚到 Pi 的能力。现有 Pi 实现只作为设计时的行为参考；完成迁移后，代码、模板、依赖和操作文档全部以 Codex 为准。
 
-本文只提出设计，不修改运行代码、不安装依赖、不发起模型调用。
+本文主体提出迁移设计；已完成的 M0 只增加隔离探针、报告和事件样本，不修改生产运行
+代码，也不把 SDK 安装进项目或全局 Python。M0 的少量真实模型调用仅用于能力验证。
 
 ## 1. 当前实现与迁移边界
 
@@ -402,7 +406,7 @@ sessions/<adw_id>/
 
 | 阶段 | 交付 | 完成标准 |
 |---|---|---|
-| M0：能力验证与版本锁定 | SDK/runtime 版本清单、事件样本、能力矩阵 | Python SDK 跑通结构化结果、同 thread 第二轮、跨进程 resume、角色指令、流事件、用量和取消；列清未覆盖能力 |
+| M0：能力验证与版本锁定（已完成） | SDK/runtime 版本清单、事件样本、能力矩阵，见 [`codex-sdk-m0-report.md`](codex-sdk-m0-report.md) | Python SDK 已跑通结构化结果、同 thread 第二轮、跨进程 resume、角色指令、流事件、用量和取消；未覆盖能力已列清 |
 | M1：核心运行替换 | 适配器、配置 v2、会话映射、schema 与重试 | 单 agent、JSON 修复、gate 修复通过；失败路径不误报成功；没有 Pi 运行依赖 |
 | M2：权限与观察 | 内容快照、异常收尾、进程清理、DB/UI 更新 | 越权/取消/崩溃正确失败，dirty 文件保护；Codex 事件和费用统计正确；禁用子代理的完整 SDLC 通过 |
 | M3：子代理和完整链路 | planner/scout 子代理策略、prompt 更新 | 子代理限制与收尾可验证，plan → build → test → review → document 通过 |
@@ -421,4 +425,9 @@ sessions/<adw_id>/
 
 适配器和故障场景优先采用录制事件/假的 SDK 传输测试；少量真实模型 smoke 验证协议与权限，避免用模型输出稳定性替代确定性测试。所有测试执行遵循本仓库“提权运行测试”的规则。
 
-M0 前仍需验证的事项：SDK 暴露原始事件和进程生命周期的方式、角色配置注入/恢复的具体签名、全体 envelope schema 的接受情况、取消后子进程行为、原生子代理约束及用量归属。它们是有明确验收的技术验证项，不是已实现能力；任何必需能力不满足，都应先调整适配方案再推进 M1。
+M0 已确认：SDK 可暴露类型化 notification，但不是 wire bytes；高层接口不暴露 app-server
+进程生命周期回调；角色指令通过 `thread_start/thread_resume(developer_instructions=...)` 注入；
+全体 envelope 经严格 schema 转换后可接受；正常 interrupt 会结束 turn 并清理本次长命令。
+原生子代理可产生父子 thread 生命周期事件，但 child usage 无法单独归属，公开配置也没有
+禁递归硬约束。因此 M1 可推进，M2 必须补进程管理，M3 在缺口关闭前保持禁用。完整证据和
+限制见 [`codex-sdk-m0-report.md`](codex-sdk-m0-report.md)。
