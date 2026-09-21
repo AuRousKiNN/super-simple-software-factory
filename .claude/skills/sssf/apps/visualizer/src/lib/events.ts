@@ -7,6 +7,10 @@ import type { AgentStartPayload, EventRow, ToolCallPayload } from './types'
 export const EVENT_DOT_COLORS: Record<string, string> = {
   agent_start: '#c89bff',
   tool_call: '#5ad2dd',
+  subagent_start: '#60a5fa',
+  subagent_end: '#34d399',
+  subagent_result: '#818cf8',
+  subagent_log: '#94a3b8',
   handoff: '#94a3ff',
   agent_end: '#4ade80',
   error: '#ff6f67',

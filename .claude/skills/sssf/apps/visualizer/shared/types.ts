@@ -15,13 +15,17 @@ export type PhaseStatus = "queued" | "running" | "success" | "fail";
 /** phases.kind — decides which lane a block renders in. */
 export type PhaseKind = "engineer" | "code" | "agent";
 
-/** events.type — the ten types tracer.py emits. */
+/** events.type — lifecycle, child-agent, tool, gate and handoff events. */
 export type EventType =
   | "phase_start"
   | "phase_end"
   | "agent_start"
   | "agent_end"
   | "tool_call"
+  | "subagent_start"
+  | "subagent_end"
+  | "subagent_result"
+  | "subagent_log"
   | "handoff"
   | "gate_pass"
   | "gate_fail"
@@ -173,7 +177,12 @@ export interface AgentStartPayload {
   coding_agent?: string;
   purpose?: string;
   config_fingerprint?: string;
-  subagents_enabled?: boolean;
+  subagents?: {
+    enabled: boolean;
+    max_concurrent: number;
+    role: string;
+    config_file: string;
+  };
 }
 
 /**
@@ -209,6 +218,24 @@ export interface AgentEndPayload {
   context_window?: number | null;
   thread_id?: string | null;
   turn_id?: string | null;
+  subagents?: SubagentRunPayload[];
+  child_usage_attribution?: "not_applicable" | "separate" | "unknown";
+  subagent_cleanup_forced?: boolean;
+}
+
+export interface SubagentRunPayload {
+  thread_id: string;
+  parent_thread_id: string;
+  parent_turn_id: string;
+  role: string;
+  agent_path: string;
+  status: "running" | "completed" | "interrupted" | "failed" | "shutdown" | "not_found" | "unknown";
+  task: string;
+  model?: string | null;
+  reasoning_effort?: string | null;
+  result: string;
+  error: string;
+  usage?: UsageBreakdown | null;
 }
 
 /**

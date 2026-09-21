@@ -12,7 +12,12 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 
-from .data_types import RuntimeErrorInfo, UsageBreakdown
+from .data_types import (
+    RuntimeErrorInfo,
+    SubagentConfig,
+    SubagentRun,
+    UsageBreakdown,
+)
 
 
 def jsonable(value: Any) -> Any:
@@ -96,6 +101,209 @@ def _usage_delta(total: UsageBreakdown, baseline: UsageBreakdown) -> UsageBreakd
     )
 
 
+class SubagentTracker:
+    """Track child lifecycle, policy compliance, results and usage attribution."""
+
+    _TERMINAL = {"completed", "interrupted", "failed", "shutdown", "not_found"}
+    _STATUS = {
+        "pendingInit": "running",
+        "running": "running",
+        "interrupted": "interrupted",
+        "completed": "completed",
+        "errored": "failed",
+        "shutdown": "shutdown",
+        "notFound": "not_found",
+    }
+
+    def __init__(self, policy: Optional[SubagentConfig] = None) -> None:
+        self.policy = policy or SubagentConfig()
+        self._children: dict[str, dict[str, Any]] = {}
+        self._active: set[str] = set()
+        self._seen_activity: set[tuple[str, str]] = set()
+        self._seen_collab: set[tuple[str, str]] = set()
+        self.violations: list[str] = []
+        self.peak_concurrent = 0
+
+    def _child(
+        self,
+        thread_id: str,
+        *,
+        parent_thread_id: str = "",
+        parent_turn_id: str = "",
+        role: str = "",
+        agent_path: str = "",
+    ) -> dict[str, Any]:
+        child = self._children.setdefault(thread_id, {
+            "thread_id": thread_id,
+            "parent_thread_id": parent_thread_id,
+            "parent_turn_id": parent_turn_id,
+            "role": role,
+            "agent_path": agent_path,
+            "status": "unknown",
+            "task": "",
+            "model": None,
+            "reasoning_effort": None,
+            "result": "",
+            "error": "",
+            "usage": None,
+        })
+        if parent_thread_id:
+            child["parent_thread_id"] = parent_thread_id
+        if parent_turn_id:
+            child["parent_turn_id"] = parent_turn_id
+        if role:
+            child["role"] = role
+        if agent_path:
+            child["agent_path"] = agent_path
+        return child
+
+    def _violate(self, message: str) -> None:
+        if message not in self.violations:
+            self.violations.append(message)
+
+    def _activate(self, thread_id: str, child: dict[str, Any]) -> None:
+        already_active = thread_id in self._active
+        child["status"] = "running"
+        self._active.add(thread_id)
+        if already_active:
+            return
+        self.peak_concurrent = max(self.peak_concurrent, len(self._active))
+        if not self.policy.enabled:
+            self._violate(f"subagent {thread_id} spawned while subagents are disabled")
+        if len(self._active) > self.policy.max_concurrent:
+            self._violate(
+                f"subagent concurrency {len(self._active)} exceeded "
+                f"configured maximum {self.policy.max_concurrent}"
+            )
+
+    def observe(self, record: dict[str, Any]) -> list[dict[str, Any]]:
+        method = str(record.get("method") or "")
+        if method not in {"item/started", "item/completed"}:
+            return []
+        params = record.get("params") or {}
+        item = params.get("item") or {}
+        item_type = item.get("type")
+        if item_type == "subAgentActivity":
+            return self._observe_activity(params, item)
+        if item_type == "collabAgentToolCall":
+            return self._observe_collab(method, params, item)
+        return []
+
+    def _observe_activity(
+        self, params: dict[str, Any], item: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        thread_id = str(item.get("agentThreadId") or "")
+        kind = str(item.get("kind") or "")
+        if not thread_id or not kind:
+            return []
+        key = (thread_id, kind)
+        if key in self._seen_activity:
+            return []
+        self._seen_activity.add(key)
+        agent_path = str(item.get("agentPath") or "")
+        child = self._child(
+            thread_id,
+            parent_thread_id=str(params.get("threadId") or ""),
+            parent_turn_id=str(params.get("turnId") or ""),
+            role=self.policy.role,
+            agent_path=agent_path,
+        )
+        if kind == "started":
+            self._activate(thread_id, child)
+            event = "started"
+        elif kind in {"completed", "interrupted"}:
+            child["status"] = kind
+            self._active.discard(thread_id)
+            event = kind
+        else:
+            event = "interacted"
+        return [{"event": event, **child}]
+
+    def _observe_collab(
+        self, method: str, params: dict[str, Any], item: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        item_id = str(item.get("id") or "")
+        key = (item_id, method)
+        if key in self._seen_collab:
+            return []
+        self._seen_collab.add(key)
+        parent_thread_id = str(item.get("senderThreadId") or params.get("threadId") or "")
+        parent_turn_id = str(params.get("turnId") or "")
+        receiver_ids = [str(value) for value in item.get("receiverThreadIds") or []]
+        if str(item.get("tool") or "") == "spawnAgent":
+            for thread_id in receiver_ids:
+                child = self._child(
+                    thread_id,
+                    parent_thread_id=parent_thread_id,
+                    parent_turn_id=parent_turn_id,
+                    role=self.policy.role,
+                )
+                child["task"] = str(item.get("prompt") or "")
+                child["model"] = item.get("model")
+                child["reasoning_effort"] = item.get("reasoningEffort")
+                if child["status"] not in self._TERMINAL:
+                    self._activate(thread_id, child)
+
+        updates: list[dict[str, Any]] = []
+        for thread_id, state in (item.get("agentsStates") or {}).items():
+            if not isinstance(state, dict):
+                continue
+            child = self._child(
+                str(thread_id),
+                parent_thread_id=parent_thread_id,
+                parent_turn_id=parent_turn_id,
+            )
+            status = self._STATUS.get(str(state.get("status") or ""), "unknown")
+            message = str(state.get("message") or "")
+            child["status"] = status
+            if status in self._TERMINAL:
+                self._active.discard(str(thread_id))
+            if status == "completed":
+                child["result"] = message
+            elif status in {"interrupted", "failed", "not_found"}:
+                child["error"] = message
+            updates.append({"event": "result", **child})
+        return updates
+
+    def observe_usage(self, record: dict[str, Any]) -> bool:
+        params = record.get("params") or {}
+        thread_id = str(params.get("threadId") or "")
+        if not thread_id or thread_id not in self._children:
+            return False
+        token_usage = params.get("tokenUsage") or {}
+        raw_usage = token_usage.get("last") or token_usage.get("total") or {}
+        if raw_usage:
+            self._children[thread_id]["usage"] = _usage_from_wire(raw_usage).model_dump()
+        return True
+
+    def finish_parent(self) -> None:
+        if self._active:
+            self._violate(
+                "parent turn ended before child threads settled: "
+                + ", ".join(sorted(self._active))
+            )
+
+    @property
+    def active_thread_ids(self) -> list[str]:
+        return sorted(self._active)
+
+    @property
+    def records(self) -> list[SubagentRun]:
+        return [
+            SubagentRun.model_validate(self._children[key])
+            for key in sorted(self._children)
+        ]
+
+    @property
+    def usage_attribution(self) -> str:
+        records = self.records
+        if not records:
+            return "not_applicable"
+        if all(record.usage is not None for record in records):
+            return "separate"
+        return "unknown"
+
+
 class CodexEventCollector:
     """Collect final text, terminal status and latest per-turn usage."""
 
@@ -103,6 +311,7 @@ class CodexEventCollector:
         self,
         raw_output_path: str | Path,
         usage_baseline: Optional[UsageBreakdown] = None,
+        subagents: Optional[SubagentConfig] = None,
     ) -> None:
         self.raw_output_path = Path(raw_output_path)
         self.final_response = ""
@@ -115,6 +324,13 @@ class CodexEventCollector:
         self.context_window: Optional[int] = None
         self.event_count = 0
         self.unknown_event_count = 0
+        self.parent_thread_id = ""
+        self.parent_turn_id = ""
+        self.subagent_tracker = SubagentTracker(subagents)
+
+    def bind_parent(self, thread_id: str, turn_id: str) -> None:
+        self.parent_thread_id = thread_id
+        self.parent_turn_id = turn_id
 
     def observe(self, notification: Any) -> dict[str, Any]:
         method = str(getattr(notification, "method", "unknown"))
@@ -133,6 +349,7 @@ class CodexEventCollector:
             raw.write(json.dumps(record, sort_keys=True) + "\n")
             raw.flush()
         self.event_count += 1
+        self.subagent_tracker.observe(record)
 
         if (
             type(payload_object).__name__ == "UnknownNotification"
@@ -148,6 +365,13 @@ class CodexEventCollector:
             ):
                 self.final_response = str(item["text"])
         elif method == "thread/tokenUsage/updated":
+            event_thread_id = str(params.get("threadId") or "")
+            if (
+                event_thread_id
+                and event_thread_id != self.parent_thread_id
+                and self.subagent_tracker.observe_usage(record)
+            ):
+                return record
             token_usage = params.get("tokenUsage") or {}
             last = token_usage.get("last") or {}
             cumulative = token_usage.get("total") or {}
@@ -160,6 +384,9 @@ class CodexEventCollector:
             context_window = token_usage.get("modelContextWindow")
             self.context_window = int(context_window) if context_window else None
         elif method == "turn/completed":
+            event_thread_id = str(params.get("threadId") or "")
+            if event_thread_id and event_thread_id != self.parent_thread_id:
+                return record
             turn = params.get("turn") or {}
             self.status = str(turn.get("status") or "outcome_unknown")
             error = turn.get("error") or {}
@@ -167,6 +394,13 @@ class CodexEventCollector:
                 self.error = RuntimeErrorInfo(
                     kind=classify_error(str(error.get("message") or error)),
                     message=str(error.get("message") or error),
+                )
+            self.subagent_tracker.finish_parent()
+            if self.subagent_tracker.violations:
+                self.status = "failed"
+                self.error = RuntimeErrorInfo(
+                    kind="subagent_policy",
+                    message="; ".join(self.subagent_tracker.violations),
                 )
         return record
 

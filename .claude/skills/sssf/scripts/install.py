@@ -8,17 +8,20 @@ Usage:
     uv run <skill>/scripts/install.py [--force]
 
 Stamps: adws/ (modules + starter ADWs), adws/adw_data/prompt_engineering/
-(4 starter agents), adws/adw_sssf_config/sssf.config.yaml, .env.sample,
+(starter agents), adws/adw_sssf_config/sssf.config.yaml, the read-only Codex
+subagent role under .codex/agents/, .env.sample,
 .gitignore entries.
 Existing files are skipped unless --force.
 """
 
 import argparse
+import json
 import shutil
 import sys
 from pathlib import Path
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
+SSSF_SKILL = Path(__file__).resolve().parent.parent / "SKILL.md"
 
 GITIGNORE_ENTRIES = [
     "adws/adw_data/sessions/",
@@ -58,6 +61,22 @@ def ensure_gitignore(root: Path, stamped: list) -> None:
         stamped.append(f"{gitignore} (+{len(missing)} entries)")
 
 
+def stamp_codex_agents(root: Path, force: bool, stamped: list, skipped: list) -> None:
+    """Render host-specific skill paths into project-scoped Codex roles."""
+    source = TEMPLATES / "codex_agents" / "sssf_recon.toml"
+    dest = root / ".codex" / "agents" / source.name
+    if dest.exists() and not force:
+        skipped.append(str(dest))
+        return
+    content = source.read_text().replace(
+        "{{sssf_skill_path_toml}}", json.dumps(str(SSSF_SKILL.resolve())),
+    )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(content)
+    shutil.copymode(source, dest)
+    stamped.append(str(dest))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--force", action="store_true", help="overwrite existing files")
@@ -71,6 +90,7 @@ def main() -> int:
           root / "adws" / "adw_data" / "prompt_engineering", args.force, stamped, skipped)
     stamp(TEMPLATES / "harness_engineering",
           root / "adws" / "adw_data" / "harness_engineering", args.force, stamped, skipped)
+    stamp_codex_agents(root, args.force, stamped, skipped)
     stamp(TEMPLATES / "sssf.config.yaml",
           root / "adws" / "adw_sssf_config" / "sssf.config.yaml",
           args.force, stamped, skipped)

@@ -321,7 +321,8 @@ class PromptEngineering(StrictConfigModel):
 class SubagentConfig(StrictConfigModel):
     enabled: bool = False
     max_concurrent: int = Field(default=6, ge=1, le=6)
-    role: str = "sssf_recon"
+    role: str = Field(default="sssf_recon", pattern=r"^[A-Za-z][A-Za-z0-9_-]*$")
+    config_file: str = ".codex/agents/sssf_recon.toml"
 
 
 class AgentConfig(StrictConfigModel):
@@ -441,7 +442,7 @@ class RuntimeErrorInfo(BaseModel):
     kind: Literal[
         "authentication", "model_unavailable", "unsupported_effort",
         "thread_unavailable", "approval_required", "timeout", "interrupted",
-        "runtime", "outcome_unknown",
+        "runtime", "outcome_unknown", "subagent_policy",
     ]
     message: str
 
@@ -463,9 +464,34 @@ class AgentRunRequest(BaseModel):
     output_schema: dict[str, Any]
     raw_output_path: str
     thread_id: Optional[str] = None
+    subagents: SubagentConfig = Field(default_factory=SubagentConfig)
     # Thread totals persisted after the previous turn. Used only when a runtime
     # omits the per-turn `last` usage and exposes cumulative counters instead.
     usage_baseline: Optional[UsageBreakdown] = None
+
+
+SubagentStatus = Literal[
+    "running", "completed", "interrupted", "failed", "shutdown", "not_found",
+    "unknown",
+]
+ChildUsageAttribution = Literal["not_applicable", "separate", "unknown"]
+
+
+class SubagentRun(BaseModel):
+    """One child thread observed during a parent Codex turn."""
+
+    thread_id: str
+    parent_thread_id: str = ""
+    parent_turn_id: str = ""
+    role: str = ""
+    agent_path: str = ""
+    status: SubagentStatus = "unknown"
+    task: str = ""
+    model: Optional[str] = None
+    reasoning_effort: Optional[ReasoningEffort] = None
+    result: str = ""
+    error: str = ""
+    usage: Optional[UsageBreakdown] = None
 
 
 class AgentRunResult(BaseModel):
@@ -483,3 +509,6 @@ class AgentRunResult(BaseModel):
     runtime_version: str = ""
     raw_event_count: int = 0
     unknown_event_count: int = 0
+    subagents: list[SubagentRun] = Field(default_factory=list)
+    child_usage_attribution: ChildUsageAttribution = "not_applicable"
+    subagent_cleanup_forced: bool = False

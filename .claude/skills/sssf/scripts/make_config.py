@@ -9,11 +9,17 @@ Usage:
 """
 
 import argparse
+import json
 import shutil
 import sys
 from pathlib import Path
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "sssf.config.yaml"
+ROLE_TEMPLATE = (
+    Path(__file__).resolve().parent.parent
+    / "templates" / "codex_agents" / "sssf_recon.toml"
+)
+SSSF_SKILL = Path(__file__).resolve().parent.parent / "SKILL.md"
 
 
 def main() -> int:
@@ -28,6 +34,16 @@ def main() -> int:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(TEMPLATE, dest)
     print(f"wrote {dest}")
+    role_dest = Path.cwd() / ".codex" / "agents" / "sssf_recon.toml"
+    if not role_dest.exists() or args.force:
+        role_dest.parent.mkdir(parents=True, exist_ok=True)
+        role_dest.write_text(ROLE_TEMPLATE.read_text().replace(
+            "{{sssf_skill_path_toml}}", json.dumps(str(SSSF_SKILL.resolve())),
+        ))
+        shutil.copymode(ROLE_TEMPLATE, role_dest)
+        print(f"wrote {role_dest}")
+    else:
+        print(f"kept existing {role_dest}")
     return 0
 
 

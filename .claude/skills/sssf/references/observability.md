@@ -17,11 +17,15 @@ Location comes from `observability.db` in `sssf.config.yaml`, default `adws/adw_
 | `phase_start` | a `run.phase(...)` block is entered |
 | `agent_start` | a coding agent is spawned or resumed for `ph.call(...)` |
 | `tool_call` | a Codex command, file change, MCP call, or dynamic tool terminates — **one event per item**, deduplicated by invocation/thread/turn/item; interrupted tools are explicit failures |
+| `subagent_start` | an allowed child thread starts; payload links parent/child thread and turn IDs plus the custom role |
+| `subagent_end` | a child reaches `completed` or `interrupted` |
+| `subagent_result` | Codex reports a child's terminal status, result or error through `agentsStates` |
+| `subagent_log` | a non-terminal child interaction is observed |
 | `handoff` | an envelope crosses from one agent to the next |
 | `gate_pass` | a gate found no failed checks — payload carries `attempt`, `checks` (the evidence), and an empty `violations` |
 | `gate_fail` | a gate found at least one failed check — payload carries `attempt`, `checks`, and `violations` |
 | `log` | an explicit `ph.log(...)` from the ADW script |
-| `agent_end` | the agent's run completes; envelope parsed or not — payload carries `cost`, `usage` (the per-component breakdown), `context_tokens`, `context_window` |
+| `agent_end` | the agent's run completes; envelope parsed or not — payload carries `cost`, `usage`, context metrics, all observed child records, child-usage attribution, and whether cleanup had to close the owning runtime |
 | `phase_end` | the block exits; carries the resolved status |
 | `error` | a raise inside a phase block |
 
@@ -32,6 +36,8 @@ Location comes from `observability.db` in `sssf.config.yaml`, default `adws/adw_
 **Unknown cost is not zero.** The current runtime does not provide a reliable amount, so turns record `cost=null, cost_kind=unknown`. `sessions.total_cost` is the known subtotal and `cost_complete` says whether it is a complete total. The terminal and UI show `unknown` whenever completeness is false.
 
 **Context is independent of spend.** Thread cumulative token usage is billing history, not current window occupancy. Until Codex provides an explicit occupancy measurement, `context_tokens` remains NULL and the lane omits its progress bar. `context_window` may still be known, but is never paired with cumulative spend to invent a percentage.
+
+**Child usage is never guessed or double-counted.** Child lifecycle and any child-thread usage notification are attached to the parent `agent_end` record. `child_usage_attribution` is `separate` only when every child published its own usage; otherwise it is `unknown`. Child usage is not added to the parent's reported turn usage because the locked runtime does not establish whether the parent total already includes it.
 
 **Gates record evidence, not just a verdict.** A gate returns one `{item, ok, note}` check per thing it looked at, and `violations` are derived from the failed ones. Both land in `gate_results` (`checks_json` + `violations_json`) and in the `gate_pass`/`gate_fail` payload, so a green gate can answer *what did you verify* — `{"item": "…/plan.md", "ok": true, "note": "exists, 454B"}` — rather than only *did it pass*. Rows written before this existed have `checks_json` NULL; treat that as "no evidence recorded", not "nothing checked".
 
@@ -77,6 +83,7 @@ events (
   phase_id      TEXT REFERENCES phases,   -- every event logs against adw + phase
   parent_id     TEXT,                     -- span nesting
   type          TEXT,   -- phase_start | phase_end | agent_start | agent_end | tool_call
+                        -- | subagent_start | subagent_end | subagent_result | subagent_log
                         -- | handoff | gate_pass | gate_fail | log | error
   name          TEXT,
   payload_json  TEXT,

@@ -16,4 +16,4 @@ Turn a request into a plan the builder can implement without asking questions.
 
 ## Subagents
 
-Subagents are disabled in this release. Perform all investigation in the current thread.
+{{subagent_instructions}}

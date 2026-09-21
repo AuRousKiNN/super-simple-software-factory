@@ -15,4 +15,4 @@ Find and report where things live. Change nothing.
 
 ## Subagents
 
-Subagents are disabled in this release. Perform all investigation in the current thread.
+{{subagent_instructions}}

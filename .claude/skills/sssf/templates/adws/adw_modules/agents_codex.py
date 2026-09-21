@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tomllib
 from pathlib import Path
 from typing import Optional
 
@@ -11,7 +12,7 @@ import yaml
 
 from . import permissions, prompts
 from .agent_codex import SDK_VERSION, RuntimeHooks
-from .codex_events import ToolCallTracker
+from .codex_events import SubagentTracker, ToolCallTracker
 from .codex_schema import strict_output_schema
 from .data_types import (
     AgentCall,
@@ -23,6 +24,7 @@ from .data_types import (
     GateCheck,
     GateReport,
     Phase,
+    RuntimeErrorInfo,
     SSSFConfig,
     UsageBreakdown,
 )
@@ -30,6 +32,7 @@ from .utils import new_id
 
 JSON_FIX_ATTEMPTS = 2
 MAX_TURNS_PER_PHASE = 12
+_SUBAGENT_PARENT_ROLES = {"planner", "scout"}
 _INHERITED_AGENT_FIELDS = (
     "coding_agent", "model", "thinking", "color", "writes",
 )
@@ -80,20 +83,32 @@ def resolve(cfg: SSSFConfig, name: str) -> AgentConfig:
 
 
 def validate(cfg: SSSFConfig, required: list[str]) -> None:
-    """Fail before a business turn when M1 cannot honor the configuration."""
+    """Fail before a business turn when the runtime cannot honor the config."""
     problems = []
     if cfg.defaults.subagents.enabled:
-        problems.append("defaults.subagents.enabled must remain false until M3")
+        problems.append(
+            "defaults.subagents.enabled must be false; enable only planner/scout explicitly"
+        )
     if cfg.codex.command_network_access:
         problems.append("codex.command_network_access=true is not supported in M1")
+    checked_role_files: set[str] = set()
+    for configured in cfg.agents:
+        if not configured.subagents.enabled:
+            continue
+        if configured.name not in _SUBAGENT_PARENT_ROLES:
+            problems.append(
+                f"agent {configured.name!r}: only planner/scout may enable subagents"
+            )
+        role_file = configured.subagents.config_file
+        if role_file not in checked_role_files:
+            checked_role_files.add(role_file)
+            problems.extend(_subagent_role_problems(configured))
     for name in required:
         try:
             agent = resolve(cfg, name)
         except SystemExit as error:
             problems.append(str(error))
             continue
-        if agent.subagents.enabled:
-            problems.append(f"agent {name!r}: subagents must remain disabled until M3")
         for label, ref in (
             ("system", agent.prompt_engineering.system),
             ("user", agent.prompt_engineering.user),
@@ -102,6 +117,76 @@ def validate(cfg: SSSFConfig, required: list[str]) -> None:
                 problems.append(f"agent {name!r}: {label} prompt not found: {ref}")
     if problems:
         raise SystemExit("config validation failed:\n- " + "\n- ".join(problems))
+
+
+def _subagent_role_problems(agent: AgentConfig) -> list[str]:
+    policy = agent.subagents
+    root = Path.cwd().resolve()
+    path = Path(policy.config_file)
+    resolved = path.resolve() if path.is_absolute() else (root / path).resolve()
+    expected_dir = (root / ".codex" / "agents").resolve()
+    problems: list[str] = []
+    try:
+        resolved.relative_to(expected_dir)
+    except ValueError:
+        return [
+            f"agent {agent.name!r}: subagent config must be under .codex/agents: "
+            f"{policy.config_file}"
+        ]
+    if not resolved.is_file():
+        return [f"agent {agent.name!r}: subagent role config not found: {policy.config_file}"]
+    if resolved.stem != policy.role:
+        problems.append(
+            f"agent {agent.name!r}: subagent config filename must match role "
+            f"{policy.role!r}"
+        )
+    try:
+        payload = tomllib.loads(resolved.read_text())
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        return [f"agent {agent.name!r}: invalid subagent role config: {error}"]
+    if payload.get("name") != policy.role:
+        problems.append(
+            f"agent {agent.name!r}: subagent role file name={payload.get('name')!r}; "
+            f"expected {policy.role!r}"
+        )
+    if payload.get("sandbox_mode") != "read-only":
+        problems.append(
+            f"agent {agent.name!r}: subagent role {policy.role!r} must use read-only sandbox"
+        )
+    child_agents = payload.get("agents") or {}
+    if not isinstance(child_agents, dict) or child_agents.get("enabled") is not False:
+        problems.append(
+            f"agent {agent.name!r}: subagent role {policy.role!r} must set agents.enabled=false"
+        )
+    instructions = " ".join(
+        str(payload.get("developer_instructions") or "").casefold().split()
+    )
+    if "do not load or invoke the sssf orchestrator skill" not in instructions:
+        problems.append(
+            f"agent {agent.name!r}: subagent role must forbid loading the orchestrator skill"
+        )
+    if "sssf_recon_ok" not in instructions:
+        problems.append(
+            f"agent {agent.name!r}: subagent role must retain its verification marker"
+        )
+    skill_entries = (payload.get("skills") or {}).get("config") or []
+    sssf_disabled = False
+    for entry in skill_entries:
+        if not isinstance(entry, dict) or entry.get("enabled") is not False:
+            continue
+        skill_path = Path(str(entry.get("path") or "")).expanduser()
+        if (
+            skill_path.is_absolute()
+            and skill_path.is_file()
+            and skill_path.as_posix().endswith(".claude/skills/sssf/SKILL.md")
+        ):
+            sssf_disabled = True
+            break
+    if not sssf_disabled:
+        problems.append(
+            f"agent {agent.name!r}: subagent role must disable the SSSF orchestrator skill"
+        )
+    return problems
 
 
 def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
@@ -122,6 +207,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             call.previous.model_dump_json(indent=2) if call.previous else "(none)"
         ),
         "context_handoff_dir": str(run.context_handoff_dir),
+        "subagent_instructions": _subagent_instructions(agent),
     }
     system_text = prompts.render(agent.prompt_engineering.system, variables)
     user_text = prompts.render(agent.prompt_engineering.user, variables)
@@ -143,6 +229,9 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         if mapped and mapped.get("usage_baseline") else None
     )
     latest: AgentRunResult | None = None
+    observed_subagents = {}
+    child_usage_attributions: set[str] = set()
+    subagent_cleanup_forced = False
     spent = UsageBreakdown(uncached_input_tokens=0, cost=0.0, cost_kind="reported")
     turn_count = 0
     succeeded = False
@@ -161,7 +250,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             "purpose": agent.purpose,
             "config_fingerprint": fingerprint,
             "invocation_id": invocation_id,
-            "subagents_enabled": False,
+            "subagents": agent.subagents.model_dump(),
         },
     ))
     run.console.agent_started(agent.name, agent.model, thread_id or "pending")
@@ -209,12 +298,12 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     hooks = RuntimeHooks(
         on_thread_ready=on_thread_ready,
         on_turn_started=on_turn_started,
-        on_event=_event_forwarder(run, phase, agent.name, invocation_id),
+        on_event=_event_forwarder(run, phase, agent, invocation_id),
         on_turn_finished=on_turn_finished,
     )
 
     def send(prompt_text: str) -> AgentRunResult:
-        nonlocal latest, turn_count
+        nonlocal latest, turn_count, subagent_cleanup_forced
         turn_count += 1
         if turn_count > MAX_TURNS_PER_PHASE:
             raise AgentRuntimeFailure(
@@ -241,6 +330,7 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                     output_schema=output_schema,
                     raw_output_path=str((invocation_dir / "raw_output.jsonl").resolve()),
                     thread_id=thread_id or None,
+                    subagents=agent.subagents,
                     usage_baseline=usage_baseline,
                 ),
                 hooks,
@@ -263,6 +353,12 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             save_mapping("failed", runtime_version=SDK_VERSION)
             raise
         latest = result
+        for child in result.subagents:
+            observed_subagents[child.thread_id] = child
+        child_usage_attributions.add(result.child_usage_attribution)
+        subagent_cleanup_forced = (
+            subagent_cleanup_forced or result.subagent_cleanup_forced
+        )
         settled = True
         if records_invocations:
             settled = run.tracer.agent_invocation_finish(
@@ -426,6 +522,13 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                 "turn_id": context.turn_id or None,
                 "context_tokens": context.context_tokens,
                 "context_window": context.context_window,
+                "subagents": [
+                    child.model_dump() for child in observed_subagents.values()
+                ],
+                "child_usage_attribution": _child_usage_attribution(
+                    observed_subagents, child_usage_attributions,
+                ),
+                "subagent_cleanup_forced": subagent_cleanup_forced,
             },
         ))
         run.console.agent_finished(agent.name, spent.total_tokens, spent.cost, succeeded)
@@ -439,6 +542,30 @@ def _as_report(result) -> GateReport:
     return GateReport(
         checks=[GateCheck(item=str(value), ok=False) for value in (result or [])]
     )
+
+
+def _subagent_instructions(agent: AgentConfig) -> str:
+    policy = agent.subagents
+    if not policy.enabled:
+        return "Subagents are disabled for this role. Work in the current thread."
+    return (
+        f"You may delegate independent, read-only investigation to at most "
+        f"{policy.max_concurrent} `{policy.role}` subagents. Give every child a bounded, "
+        "self-contained task and require a concise evidence summary. Children must not edit "
+        "files, load the SSSF orchestrator skill, or create further subagents. Do not poll, "
+        "interrupt, or repeatedly query children while they work; wait for every child you "
+        "created to reach a terminal state, account for failures, then synthesize their "
+        "results in this parent thread. Do not override the inherited child model or reasoning "
+        "effort."
+    )
+
+
+def _child_usage_attribution(observed: dict, attributions: set[str]) -> str:
+    if not observed:
+        return "not_applicable"
+    if attributions and attributions <= {"separate"}:
+        return "separate"
+    return "unknown"
 
 
 def _config_fingerprint(run, agent: AgentConfig, system_text: str) -> str:
@@ -489,8 +616,15 @@ def _compatible_mapping(run, agent: AgentConfig, fingerprint: str) -> Optional[d
     return entry
 
 
-def _event_forwarder(run, phase: Phase, agent_name: str, invocation_id: str = ""):
+def _event_forwarder(
+    run,
+    phase: Phase,
+    agent: AgentConfig,
+    invocation_id: str = "",
+):
     tracker = ToolCallTracker(invocation_id)
+    child_tracker = SubagentTracker(agent.subagents)
+    agent_name = agent.name
 
     def forward(event: dict) -> None:
         for record in tracker.observe(event):
@@ -502,6 +636,21 @@ def _event_forwarder(run, phase: Phase, agent_name: str, invocation_id: str = ""
                 started_at=record.pop("started_at", None),
                 ended_at=record.pop("ended_at", None),
                 payload={**record, "agent": agent_name},
+            ))
+        for record in child_tracker.observe(event):
+            kind = record.pop("event")
+            event_type = {
+                "started": "subagent_start",
+                "completed": "subagent_end",
+                "interrupted": "subagent_end",
+                "result": "subagent_result",
+            }.get(kind, "subagent_log")
+            run.tracer.event(EventRecord(
+                adw_id=run.adw_id,
+                phase_id=phase.phase_id,
+                type=event_type,
+                name=str(record.get("role") or record.get("thread_id") or "subagent"),
+                payload={**record, "event": kind, "agent": agent_name},
             ))
     return forward
 

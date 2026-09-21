@@ -274,7 +274,11 @@ class CodexRuntime:
         return capabilities
 
     def run_turn(self, request: AgentRunRequest, hooks: RuntimeHooks) -> AgentRunResult:
-        collector = CodexEventCollector(request.raw_output_path, request.usage_baseline)
+        collector = CodexEventCollector(
+            request.raw_output_path,
+            request.usage_baseline,
+            request.subagents,
+        )
         thread_id = request.thread_id or ""
         turn_id = ""
         runtime_version = ""
@@ -290,7 +294,7 @@ class CodexRuntime:
                 thread = codex.thread_resume(
                     request.thread_id,
                     approval_mode=ApprovalMode.deny_all,
-                    config=_thread_config(),
+                    config=_thread_config(request.subagents),
                     cwd=request.cwd,
                     developer_instructions=request.developer_instructions,
                     model=request.model,
@@ -300,7 +304,7 @@ class CodexRuntime:
             else:
                 thread = codex.thread_start(
                     approval_mode=ApprovalMode.deny_all,
-                    config=_thread_config(),
+                    config=_thread_config(request.subagents),
                     cwd=request.cwd,
                     developer_instructions=request.developer_instructions,
                     model=request.model,
@@ -325,6 +329,7 @@ class CodexRuntime:
                 sandbox=Sandbox.workspace_write,
             )
             turn_id = handle.id
+            collector.bind_parent(thread_id, turn_id)
             if hooks.on_turn_started:
                 hooks.on_turn_started(turn_id)
 
@@ -373,6 +378,12 @@ class CodexRuntime:
                 error = error or RuntimeErrorInfo(
                     kind="outcome_unknown", message="turn ended without a recognized terminal state"
                 )
+            cleanup_forced = bool(collector.subagent_tracker.active_thread_ids)
+            if cleanup_forced:
+                # A parent terminal event with live children cannot be accepted.
+                # Closing the owning app-server is the only public-SDK boundary
+                # that guarantees those child turns do not outlive the phase.
+                self._shutdown_client(self.config.shutdown_grace_s)
             result = AgentRunResult(
                 thread_id=thread_id,
                 turn_id=turn_id,
@@ -386,10 +397,16 @@ class CodexRuntime:
                 runtime_version=runtime_version,
                 raw_event_count=collector.event_count,
                 unknown_event_count=collector.unknown_event_count,
+                subagents=collector.subagent_tracker.records,
+                child_usage_attribution=collector.subagent_tracker.usage_attribution,
+                subagent_cleanup_forced=cleanup_forced,
             )
         except Exception as exc:
             message = str(exc) or repr(exc)
             kind = classify_error(message)
+            cleanup_forced = bool(collector.subagent_tracker.active_thread_ids)
+            if cleanup_forced:
+                self._shutdown_client(self.config.shutdown_grace_s)
             result = AgentRunResult(
                 thread_id=thread_id,
                 turn_id=turn_id,
@@ -403,6 +420,9 @@ class CodexRuntime:
                 runtime_version=runtime_version,
                 raw_event_count=collector.event_count,
                 unknown_event_count=collector.unknown_event_count,
+                subagents=collector.subagent_tracker.records,
+                child_usage_attribution=collector.subagent_tracker.usage_attribution,
+                subagent_cleanup_forced=cleanup_forced,
             )
         finally:
             if acquired:
@@ -416,31 +436,45 @@ class CodexRuntime:
         if self._closed:
             return
         self._closed = True
-        if self._codex is not None:
+        self._shutdown_client(self.config.shutdown_grace_s)
+
+    def _shutdown_client(self, grace_s: float) -> None:
+        """Close the current SDK connection and its owned app-server processes."""
+        client = self._codex
+        self._codex = None
+        self._threads.clear()
+        self._preflight.clear()
+        if client is not None:
             finished = threading.Event()
 
             def close_client() -> None:
                 try:
-                    self._codex.close()
+                    client.close()
                 finally:
                     finished.set()
 
             closer = threading.Thread(target=close_client, daemon=True)
             closer.start()
-            finished.wait(self.config.shutdown_grace_s)
-        self._processes.terminate_all(self.config.shutdown_grace_s)
-        self._codex = None
-        self._threads.clear()
+            finished.wait(grace_s)
+        self._processes.terminate_all(grace_s)
 
 
 def _runtime_version(metadata: Any) -> str:
     server_info = getattr(metadata, "serverInfo", None) or getattr(metadata, "server_info", None)
-    return str(getattr(server_info, "version", "") or "")
+    raw = str(getattr(server_info, "version", "") or "")
+    # Runtime 0.155.1 may append platform and SDK transport metadata to the
+    # version field. The release identity is still the leading exact semver.
+    match = re.match(r"^(\d+\.\d+\.\d+)(?=$|[\s(])", raw)
+    return match.group(1) if match else raw
 
 
-def _thread_config() -> dict[str, Any]:
-    """Disable capabilities that M1 has not yet accepted."""
+def _thread_config(subagents) -> dict[str, Any]:
+    """Build the per-role Codex config; disabled roles expose no agent tools."""
     return {
-        "agents": {"enabled": False},
+        "agents": {
+            "enabled": subagents.enabled,
+            "max_concurrent_threads_per_session": subagents.max_concurrent,
+            "interrupt_message": True,
+        },
         "web_search": "disabled",
     }

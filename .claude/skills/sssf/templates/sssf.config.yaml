@@ -6,9 +6,10 @@ defaults:
   model: gpt-5.6-terra             # exact Codex model id; availability is preflighted
   thinking: medium                 # none|minimal|low|medium|high|xhigh|max|ultra
   subagents:
-    enabled: false                 # M3 acceptance is required before this can be true
+    enabled: false                 # opt in only on planner/scout; other roles stay single-threaded
     max_concurrent: 6
     role: sssf_recon
+    config_file: .codex/agents/sssf_recon.toml
   # Off-limits to every agent that does not name them in its own `writes`.
   # Codex sandbox and these content-level write contracts are separate layers.
   # An agent must not edit the machinery that decides whether its own work passed.
@@ -44,6 +45,8 @@ agents:
     prompt_engineering:
       system: adws/adw_data/prompt_engineering/planner/system.md
       user: adws/adw_data/prompt_engineering/planner/user.md
+    subagents:
+      enabled: true
     writes:                        # the plan is the only thing it may leave in the repo
       - specs/
 
@@ -62,6 +65,8 @@ agents:
     prompt_engineering:
       system: adws/adw_data/prompt_engineering/scout/system.md
       user: adws/adw_data/prompt_engineering/scout/user.md
+    subagents:
+      enabled: true
     writes: []                     # read-only, and now actually read-only: its findings
                                    # go to context_handoff/, which is runtime, not the repo
 
