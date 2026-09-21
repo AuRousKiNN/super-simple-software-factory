@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# dependencies = ["pydantic", "python-dotenv", "pyyaml", "rich"]
+# dependencies = ["openai-codex==0.155.1", "pydantic", "python-dotenv", "pyyaml", "rich"]
 # ///
 """ADW Build Test — implement, then verify; failures flow back into the builder.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# dependencies = ["pydantic", "python-dotenv", "pyyaml", "rich"]
+# dependencies = ["openai-codex==0.155.1", "pydantic", "python-dotenv", "pyyaml", "rich"]
 # ///
 """ADW Plan Build Test Quality — full agent chain plus deterministic quality.
 

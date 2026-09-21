@@ -11,10 +11,15 @@ import json
 import sqlite3
 from pathlib import Path
 
-from .data_types import AgentConfig, EventRecord, GateReport, Phase
+from .data_types import AgentConfig, EventRecord, GateReport, Phase, UsageBreakdown
 from .utils import ensure_dir, new_id, now_iso
 
 SCHEMA = """
+CREATE TABLE schema_meta (
+  singleton      INTEGER PRIMARY KEY CHECK (singleton = 1),
+  schema_version INTEGER NOT NULL
+);
+INSERT INTO schema_meta (singleton, schema_version) VALUES (1, 2);
 CREATE TABLE IF NOT EXISTS sessions (
   adw_id        TEXT PRIMARY KEY,
   adw_name      TEXT,                -- ADW script(s) run, e.g. "adw_plan + adw_build_test"
@@ -22,7 +27,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   status        TEXT,
   engineer      TEXT,
   started_at    TEXT, ended_at TEXT,
-  total_tokens  INTEGER DEFAULT 0, total_cost REAL DEFAULT 0,
+  total_tokens  INTEGER NOT NULL DEFAULT 0,
+  total_cost    REAL NOT NULL DEFAULT 0, -- known subtotal only
+  cost_complete INTEGER NOT NULL DEFAULT 1,
   archived      INTEGER DEFAULT 0   -- review triage, set by the UI; never by a run
 );
 CREATE TABLE IF NOT EXISTS phases (
@@ -74,6 +81,7 @@ CREATE TABLE IF NOT EXISTS processes (
   kind          TEXT,                -- 'adw' (the workflow process) | 'agent' (a coding-agent child)
   name          TEXT,                -- '' for the adw, the agent name for a child
   pid           INTEGER,
+  start_marker  TEXT,                -- process start identity; protects against PID reuse
   command       TEXT,                -- what the pid was, so a recycled pid is not killed by mistake
   started_at    TEXT, ended_at TEXT  -- ended_at NULL = believed alive
 );
@@ -87,16 +95,29 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
   created_at    TEXT, last_used_at TEXT,
   PRIMARY KEY (adw_id, agent)
 );
+CREATE TABLE agent_invocations (
+  invocation_id TEXT PRIMARY KEY,
+  adw_id        TEXT REFERENCES sessions,
+  phase_id      TEXT REFERENCES phases,
+  agent         TEXT,
+  thread_id     TEXT,
+  turn_id       TEXT,
+  status        TEXT,
+  sdk_version   TEXT,
+  runtime_version TEXT,
+  usage_json    TEXT,
+  usage_settled INTEGER NOT NULL DEFAULT 0,
+  started_at    TEXT,
+  ended_at      TEXT
+);
+CREATE UNIQUE INDEX settled_turn_once
+  ON agent_invocations(thread_id, turn_id)
+  WHERE usage_settled = 1 AND thread_id <> '' AND turn_id <> '';
 """
 
 # Columns added after a schema shipped. CREATE TABLE IF NOT EXISTS never
 # revisits an existing table, so additive changes need an explicit ALTER.
-MIGRATIONS = [("agent_sessions", "color", "TEXT"),
-              ("gate_results", "checks_json", "TEXT"),
-              ("sessions", "adw_name", "TEXT"),
-              ("agent_sessions", "context_tokens", "INTEGER"),
-              ("agent_sessions", "context_window", "INTEGER"),
-              ("sessions", "archived", "INTEGER DEFAULT 0")]
+SCHEMA_VERSION = 2
 
 
 class Tracer:
@@ -109,15 +130,43 @@ class Tracer:
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.execute("PRAGMA synchronous=NORMAL;")
         self.conn.execute("PRAGMA busy_timeout=5000;")
-        self.conn.executescript(SCHEMA)
-        self._migrate()
+        self._open_schema()
 
-    def _migrate(self) -> None:
-        """Additive column migrations, so a db from an older SSSF still opens."""
-        for table, column, decl in MIGRATIONS:
-            columns = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
-            if column not in columns:
-                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+    def _open_schema(self) -> None:
+        tables = {
+            row[0] for row in self.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+        }
+        if not tables:
+            self.conn.executescript(SCHEMA)
+            return
+        if "schema_meta" not in tables:
+            self.conn.close()
+            raise RuntimeError(
+                f"unsupported observability database at {self.db_path}: missing schema_meta; "
+                "back it up outside the active data directory and create a fresh schema v2 DB"
+            )
+        row = self.conn.execute(
+            "SELECT schema_version FROM schema_meta WHERE singleton=1"
+        ).fetchone()
+        if row is None or row[0] != SCHEMA_VERSION:
+            found = row[0] if row else "missing"
+            self.conn.close()
+            raise RuntimeError(
+                f"unsupported observability schema {found!r} at {self.db_path}; "
+                f"expected {SCHEMA_VERSION}"
+            )
+        required = {
+            "sessions", "phases", "events", "envelopes", "gate_results",
+            "processes", "agent_sessions", "agent_invocations",
+        }
+        missing = sorted(required - tables)
+        if missing:
+            self.conn.close()
+            raise RuntimeError(
+                f"incomplete observability schema v2 at {self.db_path}; missing: {missing}"
+            )
 
     # ── events ──────────────────────────────────────────────────────────────
     def event(self, record: EventRecord) -> str:
@@ -164,15 +213,22 @@ class Tracer:
         )
         self.processes_end_all(adw_id)   # nothing of this run is alive any more
 
-    def session_add_usage(self, adw_id: str, tokens: int, cost: float) -> None:
+    def session_add_usage(self, adw_id: str, usage: UsageBreakdown) -> None:
+        """Accumulate billed tokens and the known cost subtotal exactly once."""
         self.conn.execute(
-            "UPDATE sessions SET total_tokens=total_tokens+?, total_cost=total_cost+? WHERE adw_id=?",
-            (tokens, cost, adw_id),
+            "UPDATE sessions SET total_tokens=total_tokens+?, total_cost=total_cost+?,"
+            " cost_complete=CASE WHEN ? THEN cost_complete ELSE 0 END WHERE adw_id=?",
+            (
+                usage.total_tokens,
+                usage.cost or 0.0,
+                int(usage.cost is not None and usage.cost_kind != "unknown"),
+                adw_id,
+            ),
         )
 
     # ── processes (adw_id → pid, so a hung run can be found and killed) ─────
     def process_start(self, adw_id: str, kind: str, name: str, pid: int,
-                      command: str) -> None:
+                      command: str, start_marker: str = "") -> None:
         """Record a live process for this run.
 
         A coding agent that hangs produces no events at all, which is exactly
@@ -181,18 +237,19 @@ class Tracer:
         run running, and how do I stop it".
         """
         self.conn.execute(
-            "INSERT INTO processes (adw_id, kind, name, pid, command, started_at)"
-            " VALUES (?,?,?,?,?,?)",
-            (adw_id, kind, name, pid, command[:500], now_iso()),
+            "INSERT INTO processes (adw_id, kind, name, pid, start_marker, command, started_at)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (adw_id, kind, name, pid, start_marker, command[:500], now_iso()),
         )
 
-    def process_end(self, adw_id: str, pid: int) -> None:
+    def process_end(self, adw_id: str, pid: int, start_marker: str = "") -> None:
         """Mark the newest live row for this pid as finished."""
         self.conn.execute(
             "UPDATE processes SET ended_at=? WHERE id = ("
             "  SELECT id FROM processes WHERE adw_id=? AND pid=? AND ended_at IS NULL"
+            "    AND (?='' OR start_marker=?)"
             "  ORDER BY id DESC LIMIT 1)",
-            (now_iso(), adw_id, pid),
+            (now_iso(), adw_id, pid, start_marker, start_marker),
         )
 
     def processes_end_all(self, adw_id: str) -> None:
@@ -249,7 +306,8 @@ class Tracer:
         )
 
     def agent_session_row(self, adw_id: str, agent: AgentConfig, session_id: str,
-                          context_tokens: int = 0, context_window: int = 0) -> None:
+                          context_tokens: int | None = None,
+                          context_window: int | None = None) -> None:
         """The agent's config row is the source of truth for its label and color.
 
         Context is carried here rather than derived from events because the lane
@@ -269,3 +327,54 @@ class Tracer:
             (adw_id, agent.name, agent.coding_agent, agent.model, agent.color,
              session_id, context_tokens, context_window, ts, ts),
         )
+
+    def agent_invocation_start(
+        self, invocation_id: str, phase: Phase, agent: str,
+        sdk_version: str,
+    ) -> None:
+        self.conn.execute(
+            "INSERT INTO agent_invocations (invocation_id, adw_id, phase_id, agent,"
+            " status, sdk_version, started_at) VALUES (?,?,?,?,?,?,?)",
+            (
+                invocation_id, phase.adw_id, phase.phase_id, agent,
+                "running", sdk_version, now_iso(),
+            ),
+        )
+
+    def agent_invocation_finish(
+        self, invocation_id: str, adw_id: str, result, usage: UsageBreakdown,
+    ) -> bool:
+        """Settle one turn; return false when that thread/turn was already billed."""
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            current = self.conn.execute(
+                "SELECT usage_settled FROM agent_invocations WHERE invocation_id=?",
+                (invocation_id,),
+            ).fetchone()
+            duplicate = None
+            if result.thread_id and result.turn_id:
+                duplicate = self.conn.execute(
+                    "SELECT invocation_id FROM agent_invocations"
+                    " WHERE thread_id=? AND turn_id=? AND usage_settled=1"
+                    " AND invocation_id<>? LIMIT 1",
+                    (result.thread_id, result.turn_id, invocation_id),
+                ).fetchone()
+            settled = bool(current and not current[0] and duplicate is None)
+            self.conn.execute(
+                "UPDATE agent_invocations SET thread_id=?, turn_id=?, status=?,"
+                " runtime_version=?, usage_json=?, usage_settled=?, ended_at=?"
+                " WHERE invocation_id=?",
+                (
+                    result.thread_id, result.turn_id, result.status,
+                    result.runtime_version, usage.model_dump_json(),
+                    int(settled or bool(current and current[0])),
+                    now_iso(), invocation_id,
+                ),
+            )
+            if settled:
+                self.session_add_usage(adw_id, usage)
+            self.conn.execute("COMMIT")
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+        return settled

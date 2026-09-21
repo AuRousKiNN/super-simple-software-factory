@@ -9,13 +9,17 @@ require a parsed envelope + green gates, enforced inside ph.call).
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import agents, git_helper
+from . import agents, git_helper, permissions
+from .agent_codex import CodexRuntime
 from .console import Console
-from .data_types import AgentCall, EnvelopeBase, EventRecord, Phase, PhaseParams
+from .data_types import (AgentCall, EnvelopeBase, EventRecord, Phase, PhaseParams,
+                         UsageBreakdown)
 from .utils import ensure_dir, now_iso
 
 
@@ -48,25 +52,87 @@ class Run:
         self.engineer = engineer
         self.phases: list[Phase] = []
         self.tokens = 0
-        self.cost = 0.0
+        self.cost: float | None = 0.0
         self._seq = tracer.max_phase_seq(adw_id)   # a joined run continues the sequence
         self.repo_root = git_helper.repo_root()    # where every agent is spawned to work
+        self.workspace_lock = permissions.acquire_workspace_lock(self.repo_root)
         self.session_dir = ensure_dir(Path(cfg.defaults.data_dir) / "sessions" / adw_id)
         self.context_handoff_dir = ensure_dir(self.session_dir / "context_handoff")
         self._agent_map_path = self.session_dir / "agent_map.json"
-        self.agent_map: dict = (json.loads(self._agent_map_path.read_text())
-                                if self._agent_map_path.exists() else {})
+        self.agent_map = self._load_agent_map()
+        try:
+            self.runtime = CodexRuntime(
+                cfg.codex,
+                self.repo_root,
+                on_process_start=lambda pid, marker, command: self.tracer.process_start(
+                    self.adw_id, "agent", "codex-app-server", pid, command,
+                    start_marker=marker,
+                ),
+                on_process_exit=lambda pid, marker: self.tracer.process_end(
+                    self.adw_id, pid, start_marker=marker,
+                ),
+            )
+        except BaseException:
+            self.workspace_lock.release()
+            raise
+        self._closed = False
 
-    # ── agent map (adw_id -> per-agent coding-agent session ids) ────────────
+    # ── agent map (adw_id -> per-agent Codex thread ids) ──────────────────
+    def _load_agent_map(self) -> dict:
+        if not self._agent_map_path.exists():
+            return {"schema_version": 2, "agents": {}}
+        try:
+            mapping = json.loads(self._agent_map_path.read_text())
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"cannot read {self._agent_map_path}: {error}") from error
+        if (not isinstance(mapping, dict)
+                or mapping.get("schema_version") != 2
+                or not isinstance(mapping.get("agents"), dict)):
+            raise RuntimeError(
+                f"unsupported agent map at {self._agent_map_path}; expected schema_version=2. "
+                "Use a new adw_id or explicitly remove the incompatible runtime mapping."
+            )
+        return mapping
+
+    def agent_entry(self, agent: str) -> dict | None:
+        entry = self.agent_map["agents"].get(agent)
+        return dict(entry) if isinstance(entry, dict) else None
+
     def save_agent_map(self, agent: str, entry: dict) -> None:
-        self.agent_map[agent] = entry
-        self._agent_map_path.write_text(json.dumps(self.agent_map, indent=2))
+        self.agent_map["agents"][agent] = entry
+        self._agent_map_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(
+            prefix=".agent_map.", suffix=".tmp", dir=self._agent_map_path.parent,
+        )
+        try:
+            with os.fdopen(fd, "w") as handle:
+                json.dump(self.agent_map, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self._agent_map_path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
     # ── usage (run totals mirror what the tracer accumulates in sqlite) ─────
-    def add_usage(self, tokens: int, cost: float) -> None:
-        self.tokens += tokens
-        self.cost += cost
-        self.tracer.session_add_usage(self.adw_id, tokens, cost)
+    def add_usage(self, usage: UsageBreakdown, *, persist: bool = True) -> None:
+        self.tokens += usage.total_tokens
+        if usage.cost is None:
+            self.cost = None
+        elif self.cost is not None:
+            self.cost += usage.cost
+        if persist:
+            self.tracer.session_add_usage(self.adw_id, usage)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.runtime.close()
+        finally:
+            self.workspace_lock.release()
 
     # ── the phase primitive ─────────────────────────────────────────────────
     @contextmanager
@@ -100,6 +166,7 @@ class Run:
             self.console.phase_ended(phase, time.monotonic() - clock)
             self.console.session_finished(False, self.tokens, self.cost,
                                           self.cfg.observability.db)
+            self.close()
             raise
         else:
             phase.status = "success"
@@ -137,6 +204,10 @@ class Run:
                 phase_id=self.phases[-1].phase_id if self.phases else "",
                 type="error", name="not_accepted", payload={"reason": note}))
             self.console.note(f"not accepted: {note}")
-        self.tracer.session_finish(self.adw_id, ok=ok)
-        self.console.session_finished(ok, self.tokens, self.cost, self.cfg.observability.db)
-        return 0 if ok else 1
+        try:
+            self.tracer.session_finish(self.adw_id, ok=ok)
+            self.console.session_finished(ok, self.tokens, self.cost,
+                                          self.cfg.observability.db)
+            return 0 if ok else 1
+        finally:
+            self.close()

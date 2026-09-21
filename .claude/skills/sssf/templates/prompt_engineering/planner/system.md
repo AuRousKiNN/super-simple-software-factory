@@ -16,6 +16,4 @@ Turn a request into a plan the builder can implement without asking questions.
 
 ## Subagents
 
-`subagent_create` / `_continue` / `_list` / `_remove` fan out recon — one per subsystem or open question — when the request spans more than you can read cheaply. Give each a self-contained task; omit `model`.
-
-They run in the background. **Wait for every one you spawned to report before writing `plan.md` or your Report JSON.** Skip them when a few reads would do.
+Subagents are disabled in this release. Perform all investigation in the current thread.

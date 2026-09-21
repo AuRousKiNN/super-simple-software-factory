@@ -12,6 +12,7 @@ import signal
 import sys
 from pathlib import Path
 
+from .agent_codex import process_start_marker
 from .data_types import SSSFConfig
 from .runner import Run
 from .tracer import Tracer
@@ -28,6 +29,7 @@ def _finalize_when_killed(run: Run) -> None:
     lets the phase context manager record the phase as failed on the way out.
     """
     def handler(signum, _frame):
+        run.close()
         run.tracer.session_finish(run.adw_id, ok=False)   # also closes process rows
         raise SystemExit(128 + signum)
 
@@ -44,7 +46,8 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None) -> Run:
     # This process is the run. Record it before any phase opens, so a run that
     # hangs in its first agent call is still killable by adw_id.
     tracer.process_start(adw_id, "adw", "", os.getpid(),
-                         " ".join([Path(sys.argv[0]).name, *sys.argv[1:]]))
+                         " ".join([Path(sys.argv[0]).name, *sys.argv[1:]]),
+                         start_marker=process_start_marker(os.getpid()))
     _finalize_when_killed(run)
     run.console.session_started(adw_id, run.engineer)
     return run

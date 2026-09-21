@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# dependencies = ["pydantic", "python-dotenv", "pyyaml", "rich"]
+# dependencies = ["openai-codex==0.155.1", "pydantic", "python-dotenv", "pyyaml", "rich"]
 # ///
 """ADW Document — write up the work that was just done, from the diff.
 

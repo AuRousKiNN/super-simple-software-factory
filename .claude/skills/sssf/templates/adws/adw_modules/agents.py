@@ -15,9 +15,9 @@ from typing import Optional
 
 import yaml
 
-from . import agent_pi, permissions, prompts
+from . import permissions, prompts
 from .data_types import (AgentCall, AgentConfig, EnvelopeBase, EventRecord,
-                         GateCheck, GateReport, Phase, PiRequest, SSSFConfig,
+                         GateCheck, GateReport, Phase, SSSFConfig,
                          UsageBreakdown)
 from .utils import new_id
 
@@ -298,3 +298,16 @@ def _persist_envelope(run, phase: Phase, agent_name: str, call: AgentCall,
                   "output_type": call.output_type.__name__, "attempt": attempt,
                   **envelope.model_dump()}
         (run.session_dir / agent_name / "envelope.json").write_text(json.dumps(record, indent=2))
+
+
+# M1 keeps this public module path stable while moving the implementation into
+# a focused Codex module. These late bindings replace every legacy function;
+# no legacy backend is imported or selected at runtime.
+from .agents_codex import (  # noqa: E402,F401
+    AgentRuntimeFailure as AgentRuntimeFailure,
+    GateFailure as GateFailure,
+    execute as execute,
+    load_config as load_config,
+    resolve as resolve,
+    validate as validate,
+)

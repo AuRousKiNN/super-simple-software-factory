@@ -122,10 +122,6 @@ export function eventLabel(e: EventRow): string {
       const summary = argsSummary(call.args)
       return summary ? `${call.tool}: ${summary}` : call.tool
     }
-    const legacy = parsePayload(e.payload_json)
-    if (legacy && typeof legacy.pi_event === 'string') {
-      return `${e.name ?? 'tool'} ${legacy.pi_event}`
-    }
   }
   return e.name ?? e.type ?? ''
 }

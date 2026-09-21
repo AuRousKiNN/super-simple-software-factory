@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Literal, Optional, Type
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 PhaseKind = Literal["engineer", "agent", "code"]
 PhaseStatus = Literal["queued", "running", "success", "fail"]
@@ -72,6 +72,8 @@ class Phase(BaseModel):
 class EnvelopeBase(BaseModel):
     """Base of every agent's final JSON response. Output types extend this."""
 
+    model_config = ConfigDict(extra="forbid")
+
     status: Literal["success", "fail"]
     summary: str = ""
     artifacts: list[str] = Field(default_factory=list)
@@ -96,6 +98,8 @@ class BuildOutput(EnvelopeBase):
 
 
 class ScoutFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     file: str
     note: str = ""
 
@@ -106,6 +110,8 @@ class ScoutOutput(EnvelopeBase):
 
 class ReviewFinding(BaseModel):
     """One thing the request (or plan) asked for, and whether it is there."""
+
+    model_config = ConfigDict(extra="forbid")
 
     requirement: str                # the ask, in the requester's words
     met: bool
@@ -296,25 +302,40 @@ class AgentCall(BaseModel):
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-class PromptEngineering(BaseModel):
+class StrictConfigModel(BaseModel):
+    """Configuration objects reject misspellings instead of ignoring them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+ReasoningEffort = Literal[
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+]
+
+
+class PromptEngineering(StrictConfigModel):
     system: str                     # path to system.md
     user: str                       # path to user.md
 
 
-class AgentConfig(BaseModel):
+class SubagentConfig(StrictConfigModel):
+    enabled: bool = False
+    max_concurrent: int = Field(default=6, ge=1, le=6)
+    role: str = "sssf_recon"
+
+
+class AgentConfig(StrictConfigModel):
     name: str
-    coding_agent: Literal["pi", "claude_code"] = "pi"
-    model: str = "google/gemini-3.6-flash"
-    thinking: str = "medium"        # off | minimal | low | medium | high | xhigh | max
+    coding_agent: Literal["codex"] = "codex"
+    model: str = "gpt-5.6-terra"
+    thinking: ReasoningEffort = "medium"
     color: str = ""                 # hex swatch for this agent's lane in the UI
     purpose: str = ""
     prompt_engineering: PromptEngineering
-    harness_engineering: list[str] = Field(default_factory=list)
-    tools: Optional[list[str]] = None    # allowlist; None = all tools usable
+    subagents: SubagentConfig = Field(default_factory=SubagentConfig)
     # What this agent may MODIFY in the repo, enforced in code after every call
-    # (see adw_modules/permissions.py). `tools` cannot express this: `bash` runs
-    # anything and `write` reaches any path, so an agent's capability list is a
-    # statement of intent that nothing checks.
+    # (see adw_modules/permissions.py). Codex sandbox constrains execution; this
+    # separate contract constrains which modifications a phase may leave behind.
     #   None  -> unrestricted, except the roster-wide `protected_files` paths
     #   []    -> read-only: may modify nothing tracked
     #   [...] -> only these. A trailing "/" means a directory prefix; a "*"
@@ -322,13 +343,13 @@ class AgentConfig(BaseModel):
     writes: Optional[list[str]] = None
 
 
-class ConfigDefaults(BaseModel):
-    coding_agent: Literal["pi", "claude_code"] = "pi"
-    model: str = "google/gemini-3.6-flash"
-    thinking: str = "medium"
+class ConfigDefaults(StrictConfigModel):
+    coding_agent: Literal["codex"] = "codex"
+    model: str = "gpt-5.6-terra"
+    thinking: ReasoningEffort = "medium"
     color: str = ""
-    harness_engineering: list[str] = Field(default_factory=list)
-    tools: Optional[list[str]] = None    # roster-wide allowlist; None = all tools usable
+    subagents: SubagentConfig = Field(default_factory=SubagentConfig)
+    writes: Optional[list[str]] = None
     # Off-limits to every agent that has not named them in its own `writes`.
     # The factory's own code is the default: an agent must not be able to edit
     # the machinery that decides whether its work passed.
@@ -338,13 +359,24 @@ class ConfigDefaults(BaseModel):
     data_dir: str = "adws/adw_data"
 
 
-class ObservabilityConfig(BaseModel):
+class CodexRuntimeConfig(StrictConfigModel):
+    auth: Literal["cli", "api_key"] = "cli"
+    approval_policy: Literal["never"] = "never"
+    turn_timeout_s: int = Field(default=900, ge=1)
+    startup_timeout_s: int = Field(default=30, ge=1)
+    shutdown_grace_s: int = Field(default=10, ge=1)
+    command_network_access: bool = False
+
+
+class ObservabilityConfig(StrictConfigModel):
     db: str = "adws/adw_data/sssf.db"
     poll_ms: int = 500
 
 
-class SSSFConfig(BaseModel):
+class SSSFConfig(StrictConfigModel):
+    schema_version: Literal[2]
     defaults: ConfigDefaults = Field(default_factory=ConfigDefaults)
+    codex: CodexRuntimeConfig = Field(default_factory=CodexRuntimeConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     agents: list[AgentConfig] = Field(default_factory=list)
 
@@ -368,80 +400,86 @@ class EventRecord(BaseModel):
     ended_at: Optional[str] = None
 
 
-# ── Pi coding agent interface ────────────────────────────────────────────────
-
-class PiRequest(BaseModel):
-    """Everything one non-interactive pi run needs."""
-
-    prompt: str
-    system_prompt: str
-    model: str                      # registry pattern, resolved to provider + id
-    thinking: str = "medium"
-    session_id: str                 # pi --session-id: creates or continues
-    session_dir: str
-    raw_output_path: str            # JSONL stream lands here
-    tools: Optional[list[str]] = None
-    extensions: list[str] = Field(default_factory=list)
-    cwd: str = "."                  # set from run.repo_root — the codebase root agents work in
-
-
 class UsageBreakdown(BaseModel):
-    """Tokens and the dollars they cost, per component, summed over a call.
+    """SSSF's Codex usage contract.
 
-    Mirrors pi's `usage` shape one-for-one so the numbers reconcile with what
-    pi itself reports: `input` EXCLUDES cache reads, which bill at their own
-    (cheaper) rate — add them to learn the size of the prompt that was sent.
+    Cached input is already included in input_tokens; reasoning is already
+    included in output_tokens. Neither is added to total_tokens a second time.
     """
+
+    usage_schema_version: Literal[2] = 2
     input_tokens: int = 0
+    cached_input_tokens: int = 0
+    uncached_input_tokens: Optional[int] = None
     output_tokens: int = 0
-    cache_read_tokens: int = 0
-    cache_write_tokens: int = 0
-    # Thinking tokens. NOT a fifth component: measured across every session on
-    # disk, reasoning is always <= output and the four components above always
-    # sum to totalTokens, so reasoning is the thinking SHARE of output, billed
-    # at the output rate. Report it nested under output, never added to it.
     reasoning_tokens: int = 0
     total_tokens: int = 0
-    input_cost: float = 0.0
-    output_cost: float = 0.0
-    cache_read_cost: float = 0.0
-    cache_write_cost: float = 0.0
-    total_cost: float = 0.0
-
-    def add_turn(self, usage: dict, total_tokens: int) -> None:
-        """Fold in one pi `message_end` usage object.
-
-        `total_tokens` is passed in rather than re-derived: the caller already
-        computes it pi's way (totalTokens, else the sum of the parts).
-        """
-        cost = usage.get("cost") or {}
-        self.input_tokens += usage.get("input") or 0
-        self.output_tokens += usage.get("output") or 0
-        self.cache_read_tokens += usage.get("cacheRead") or 0
-        self.cache_write_tokens += usage.get("cacheWrite") or 0
-        self.reasoning_tokens += usage.get("reasoning") or 0
-        self.total_tokens += total_tokens
-        self.input_cost += cost.get("input") or 0.0
-        self.output_cost += cost.get("output") or 0.0
-        self.cache_read_cost += cost.get("cacheRead") or 0.0
-        self.cache_write_cost += cost.get("cacheWrite") or 0.0
-        self.total_cost += cost.get("total") or 0.0
+    cost: Optional[float] = None
+    cost_kind: Literal["reported", "estimated", "unknown"] = "unknown"
 
     def merge(self, other: "UsageBreakdown") -> None:
         """Add another call's usage — a phase that retries spends more than once."""
-        for field in self.model_fields:
-            setattr(self, field, getattr(self, field) + getattr(other, field))
+        self.input_tokens += other.input_tokens
+        self.cached_input_tokens += other.cached_input_tokens
+        self.output_tokens += other.output_tokens
+        self.reasoning_tokens += other.reasoning_tokens
+        self.total_tokens += other.total_tokens
+        if self.uncached_input_tokens is not None and other.uncached_input_tokens is not None:
+            self.uncached_input_tokens += other.uncached_input_tokens
+        else:
+            self.uncached_input_tokens = None
+        if self.cost is not None and other.cost is not None:
+            self.cost += other.cost
+            if self.cost_kind != other.cost_kind:
+                self.cost_kind = "estimated"
+        else:
+            self.cost = None
+            self.cost_kind = "unknown"
 
 
-class PiResult(BaseModel):
+class RuntimeErrorInfo(BaseModel):
+    kind: Literal[
+        "authentication", "model_unavailable", "unsupported_effort",
+        "thread_unavailable", "approval_required", "timeout", "interrupted",
+        "runtime", "outcome_unknown",
+    ]
+    message: str
+
+
+class RuntimeCapabilities(BaseModel):
+    sdk_version: str
+    runtime_version: str
+    model: str
+    effort: ReasoningEffort
+
+
+class AgentRunRequest(BaseModel):
+    role: str
+    cwd: str
+    model: str
+    effort: ReasoningEffort
+    developer_instructions: str
+    prompt: str
+    output_schema: dict[str, Any]
+    raw_output_path: str
+    thread_id: Optional[str] = None
+    # Thread totals persisted after the previous turn. Used only when a runtime
+    # omits the per-turn `last` usage and exposes cumulative counters instead.
+    usage_baseline: Optional[UsageBreakdown] = None
+
+
+class AgentRunResult(BaseModel):
+    thread_id: str = ""
+    turn_id: str = ""
     text: str = ""
-    returncode: int = 0
-    session_id: str = ""
-    tokens: int = 0
-    cost: float = 0.0
+    status: Literal["completed", "failed", "interrupted", "outcome_unknown"] = "failed"
+    error: Optional[RuntimeErrorInfo] = None
     usage: UsageBreakdown = Field(default_factory=UsageBreakdown)
-    # Context occupancy after the LAST turn — not a sum. `tokens` bills every
-    # turn; this is how full the window is right now, which is what the
-    # visualizer's context bar measures against `context_window`.
-    context_tokens: int = 0
-    context_window: int = 0         # 0 when the registry declares no ceiling
+    cumulative_usage: Optional[UsageBreakdown] = None
+    # Cumulative billed tokens are not context occupancy.  Keep occupancy
+    # unknown unless the runtime publishes an explicit measurement.
+    context_tokens: Optional[int] = None
+    context_window: Optional[int] = None
+    runtime_version: str = ""
+    raw_event_count: int = 0
+    unknown_event_count: int = 0

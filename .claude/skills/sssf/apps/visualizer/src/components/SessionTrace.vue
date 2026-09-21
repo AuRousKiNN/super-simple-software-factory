@@ -26,7 +26,7 @@ const props = defineProps<{ adwId: string; phaseId: string | null }>()
 const session = ref<Session | null>(null)
 const phases = ref<Phase[]>([])
 const agents = ref<AgentSession[]>([])
-const usage = ref<SessionUsage>({ read: 0, written: 0 })
+const usage = ref<SessionUsage>({ read: 0, cached: 0, input: 0, written: 0, reasoning: 0 })
 const events = ref<EventRow[]>([])
 const envelopes = ref<Envelope[]>([])
 const gates = ref<GateResult[]>([])
@@ -435,7 +435,7 @@ function selectPhase(p: Phase) {
       <StatusChip :status="session.status ?? 'fail'" />
       <span class="dim">started {{ fmtDate(session.started_at) }}</span>
       <span class="run-stats">
-        <StatChip kind="cost" :value="session.total_cost" />
+        <StatChip kind="cost" :value="session.cost_complete ? session.total_cost : null" />
         <StatChip kind="runtime" :value="sessionDurationMs" />
         <StatChip kind="tokens" :value="session.total_tokens" />
         <StatChip kind="read" :value="usage.read" />

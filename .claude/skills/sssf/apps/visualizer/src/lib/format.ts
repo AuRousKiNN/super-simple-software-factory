@@ -36,7 +36,7 @@ export function fmtTokens(n: number | null | undefined): string {
 }
 
 export function fmtCost(n: number | null | undefined): string {
-  if (n == null) return '—'
+  if (n == null) return 'unknown'
   return n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`
 }
 

@@ -50,16 +50,17 @@ class Console:
         self._emit(f"[bold cyan]adw_id:[/bold cyan] [bold]{escape(adw_id)}[/bold]"
                    f"   [dim]engineer[/dim] {escape(engineer)}")
 
-    def session_finished(self, ok: bool, tokens: int, cost: float, db_path: str) -> None:
+    def session_finished(self, ok: bool, tokens: int, cost: float | None, db_path: str) -> None:
         if self._finished:
             return
         self._finished = True
         passed = sum(1 for r in self.results if r == "success")
         status = "[green]✓ success[/green]" if ok else "[red]✗ fail[/red]"
+        cost_text = f"${cost:.4f}" if cost is not None else "unknown"
         rows = [f" [dim]status[/dim]   {status}",
                 f" [dim]phases[/dim]   {passed}/{len(self.results)} passed",
                 f" [dim]tokens[/dim]   {tokens:,}",
-                f" [dim]cost[/dim]     ${cost:.4f}",
+                f" [dim]cost[/dim]     {cost_text}",
                 f" [dim]adw_id[/dim]   {escape(self.adw_id)}",
                 f" [dim]db[/dim]       {escape(str(db_path))}",
                 f" [dim]next[/dim]     [bold]just phases {escape(self.adw_id)}[/bold]"]
@@ -67,7 +68,7 @@ class Console:
                       title="[bold]ADW complete[/bold]",
                       border_style="green" if ok else "red", expand=False)
         plain = (f"session {self.adw_id} {'success' if ok else 'fail'} · "
-                 f"{passed}/{len(self.results)} phases · {tokens:,} tokens · ${cost:.4f}")
+                 f"{passed}/{len(self.results)} phases · {tokens:,} tokens · {cost_text}")
         self._emit(escape(plain), level="info" if ok else "error", renderable=panel)
 
     # ── phases ──────────────────────────────────────────────────────────────
@@ -96,12 +97,18 @@ class Console:
         self._emit(f"  [dim]· {escape(_clip(message))}[/dim]")
 
     # ── agents ──────────────────────────────────────────────────────────────
-    def agent_started(self, name: str, model: str, session_id: str) -> None:
+    def agent_started(self, name: str, model: str, thread_id: str) -> None:
         self._emit(f"  [magenta]▸[/magenta] {escape(name)} [dim]{escape(model)}[/dim]"
-                   f"  [dim]session {escape(session_id)}[/dim]")
+                   f"  [dim]thread {escape(thread_id)}[/dim]")
 
-    def agent_finished(self, name: str, tokens: int, cost: float) -> None:
-        self._emit(f"  [dim]└ {escape(name)} used {tokens:,} tokens · ${cost:.4f}[/dim]")
+    def agent_finished(self, name: str, tokens: int, cost: float | None,
+                       succeeded: bool = True) -> None:
+        cost_text = f"${cost:.4f}" if cost is not None else "cost unknown"
+        status = "completed" if succeeded else "failed"
+        self._emit(
+            f"  [dim]└ {escape(name)} {status} · {tokens:,} tokens · {cost_text}[/dim]",
+            level="info" if succeeded else "error",
+        )
 
     def retry(self, name: str, attempt: int, limit: int, reason: str) -> None:
         self._emit(f"  [yellow]⟳[/yellow] {escape(name)} retry {attempt}/{limit} "

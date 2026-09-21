@@ -31,6 +31,7 @@ import type {
 const DEFAULT_DB_RELATIVE = "adws/adw_data/sssf.db";
 const MAX_LIMIT = 1000;
 const DEFAULT_LIMIT = 500;
+const SCHEMA_VERSION = 2;
 
 /**
  * Resolve the db path: --db arg wins, then SSSF_DB, then <cwd>/adws/adw_data/sssf.db.
@@ -61,8 +62,6 @@ export class SssfDb {
   private readonly db: Database;
   /** Opened on first archive and kept; null until then. */
   private writer: Database | null = null;
-  /** Cache for optionalColumn(), keyed "table.column". Only ever false → true. */
-  private readonly columnCache = new Map<string, boolean>();
 
   constructor(path: string) {
     if (!existsSync(path)) {
@@ -75,6 +74,27 @@ export class SssfDb {
     this.path = path;
     this.sessionsDir = resolve(dirname(path), "sessions");
     this.db = new Database(path, { readonly: true });
+
+    let schema: { schema_version: number } | null = null;
+    try {
+      schema = this.db
+        .query<{ schema_version: number }, []>(
+          "SELECT schema_version FROM schema_meta WHERE singleton = 1",
+        )
+        .get();
+    } catch {
+      this.db.close();
+      throw new Error(
+        `unsupported observability database at ${path}: expected schema v${SCHEMA_VERSION}`,
+      );
+    }
+    if (schema?.schema_version !== SCHEMA_VERSION) {
+      this.db.close();
+      throw new Error(
+        `unsupported observability schema ${schema?.schema_version ?? "missing"} at ${path}; ` +
+          `expected ${SCHEMA_VERSION}`,
+      );
+    }
 
     // WAL is set by the tracer when it creates the db; a readonly connection
     // cannot change it, so we assert rather than set, and always take the
@@ -94,35 +114,6 @@ export class SssfDb {
 
   }
 
-  /**
-   * A SELECT fragment for a column the tracer adds by migration.
-   *
-   * We open readonly and cannot run those ALTERs ourselves, so selecting one
-   * blindly would throw "no such column" on every request against a db an older
-   * tracer wrote. Instead we probe and substitute NULL, which reads downstream
-   * as "this db predates the column" — the same thing the UI shows for a row
-   * the migration didn't backfill.
-   *
-   * The probe re-runs while the column is missing, because the tracer's ALTER
-   * can land while we're serving: a startup-only check would keep returning
-   * NULL for the rest of the process even after the data arrived. Once seen,
-   * a column never goes away, so it latches.
-   */
-  private hasColumn(table: string, column: string): boolean {
-    const key = `${table}.${column}`;
-    if (!this.columnCache.get(key)) {
-      const cols = this.db
-        .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
-        .all();
-      this.columnCache.set(key, cols.some((c) => c.name === column));
-    }
-    return this.columnCache.get(key) ?? false;
-  }
-
-  private optionalColumn(table: string, column: string): string {
-    return this.hasColumn(table, column) ? column : `NULL AS ${column}`;
-  }
-
   close(): void {
     this.writer?.close();
     this.db.close();
@@ -136,9 +127,6 @@ export class SssfDb {
    * does not exist, so the route can 404 instead of silently succeeding.
    */
   setArchived(adwId: string, archived: boolean): boolean {
-    if (!this.hasColumn("sessions", "archived")) {
-      throw new Error("this db predates the archived column — run any ADW once to migrate it");
-    }
     if (!this.writer) {
       this.writer = new Database(this.path);
       this.writer.exec("PRAGMA busy_timeout=5000;");
@@ -153,12 +141,11 @@ export class SssfDb {
   sessions(limit = 200): SessionSummary[] {
     const rows = this.db
       .query<Session, [number]>(
-        `SELECT adw_id, ${this.optionalColumn("sessions", "adw_name")}, request,
+        `SELECT adw_id, adw_name, request,
                 status, engineer, started_at, ended_at,
-                total_tokens, total_cost,
-                ${this.optionalColumn("sessions", "archived")}
+                total_tokens, total_cost, cost_complete, archived
            FROM sessions
-          WHERE COALESCE(${this.hasColumn("sessions", "archived") ? "archived" : "0"}, 0) = 0
+          WHERE archived = 0
           ORDER BY started_at DESC, rowid DESC
           LIMIT ?`,
       )
@@ -206,9 +193,9 @@ export class SssfDb {
     return (
       this.db
         .query<Session, [string]>(
-          `SELECT adw_id, ${this.optionalColumn("sessions", "adw_name")}, request,
+          `SELECT adw_id, adw_name, request,
                   status, engineer, started_at, ended_at,
-                  total_tokens, total_cost
+                  total_tokens, total_cost, cost_complete, archived
              FROM sessions WHERE adw_id = ?`,
         )
         .get(adwId) ?? null
@@ -235,7 +222,7 @@ export class SssfDb {
    *
    * agents.py writes the agent_sessions row only after the envelope persists, so
    * a running agent has no row there — precisely the case the live view exists
-   * for. Its model, color and session_id are already on the agent_start event,
+   * for. Its model, color and thread_id are already on the agent_start event,
    * so a lane is labelled and colored from the moment the agent spawns.
    */
   private agentsFor(adwIds: string[]): Map<string, AgentSession[]> {
@@ -249,14 +236,10 @@ export class SssfDb {
       else byAdw.set(adwId, [agent]);
     };
 
-    const color = this.optionalColumn("agent_sessions", "color");
-    const ctxUsed = this.optionalColumn("agent_sessions", "context_tokens");
-    const ctxWindow = this.optionalColumn("agent_sessions", "context_window");
-
     const completed = this.db
       .query<AgentSession, string[]>(
-        `SELECT adw_id, agent, coding_agent, model, session_id, ${color},
-                ${ctxUsed}, ${ctxWindow}, created_at, last_used_at
+        `SELECT adw_id, agent, coding_agent, model, session_id, color,
+                context_tokens, context_window, created_at, last_used_at
            FROM agent_sessions WHERE adw_id IN (${placeholders})
           ORDER BY created_at, agent`,
       )
@@ -295,7 +278,7 @@ export class SssfDb {
         agent: row.agent,
         coding_agent: null,
         model: payload.model ?? null,
-        session_id: payload.session_id ?? null,
+        session_id: payload.thread_id ?? null,
         color: payload.color ?? null,
         // Occupancy is only known once the agent's turn closes.
         context_tokens: null,
@@ -340,23 +323,29 @@ export class SssfDb {
       .all(adwId);
 
     let read = 0;
+    let cached = 0;
+    let input = 0;
     let written = 0;
+    let reasoning = 0;
     for (const row of rows) {
       if (!row.payload_json) continue;
       try {
-        const u = (JSON.parse(row.payload_json) as { usage?: Record<string, number> }).usage;
+        const u = (
+          JSON.parse(row.payload_json) as {
+            usage?: Record<string, number | null>;
+          }
+        ).usage;
         if (!u) continue;
-        // RAW reads only: material entering the context for the first time,
-        // billed either as uncached input or as a cache write. Cache reads are
-        // the same tokens served again on later turns — counting them here
-        // would rebuild the very inflation this split exists to expose.
-        read += (u.input_tokens ?? 0) + (u.cache_write_tokens ?? 0);
+        input += u.input_tokens ?? 0;
+        cached += u.cached_input_tokens ?? 0;
+        read += u.uncached_input_tokens ?? u.input_tokens ?? 0;
         written += u.output_tokens ?? 0;
+        reasoning += u.reasoning_tokens ?? 0;
       } catch {
         /* a payload written by an older tracer simply contributes nothing */
       }
     }
-    return { read, written };
+    return { read, cached, input, written, reasoning };
   }
 
   /**
@@ -394,11 +383,10 @@ export class SssfDb {
   }
 
   gates(adwId: string): GateResult[] {
-    const checks = this.optionalColumn("gate_results", "checks_json");
     return this.db
       .query<GateResult, [string]>(
         `SELECT id, adw_id, phase_id, attempt, gate, passed, violations_json,
-                ${checks}, created_at
+                checks_json, created_at
            FROM gate_results WHERE adw_id = ? ORDER BY id`,
       )
       .all(adwId);

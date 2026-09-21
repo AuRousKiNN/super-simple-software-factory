@@ -1,6 +1,6 @@
 # Observability Reference
 
-The event schema, the seven SQLite tables, and the polling contract — the one data path is **agents → sqlite → web ui**.
+The Codex event schema, the versioned SQLite tables, and the polling contract — the one data path is **agents → sqlite → web ui**.
 
 ## Two stores, one truth
 
@@ -16,7 +16,7 @@ Location comes from `observability.db` in `sssf.config.yaml`, default `adws/adw_
 |---|---|
 | `phase_start` | a `run.phase(...)` block is entered |
 | `agent_start` | a coding agent is spawned or resumed for `ph.call(...)` |
-| `tool_call` | a tool (`read`, `bash`, `edit`, `write`) returns — **one event per real call**, named `bash: ls -la src`, payload `{tool, tool_call_id, args, result_snippet, ok, duration_ms, agent}` |
+| `tool_call` | a Codex command, file change, MCP call, or dynamic tool terminates — **one event per item**, deduplicated by invocation/thread/turn/item; interrupted tools are explicit failures |
 | `handoff` | an envelope crosses from one agent to the next |
 | `gate_pass` | a gate found no failed checks — payload carries `attempt`, `checks` (the evidence), and an empty `violations` |
 | `gate_fail` | a gate found at least one failed check — payload carries `attempt`, `checks`, and `violations` |
@@ -27,15 +27,11 @@ Location comes from `observability.db` in `sssf.config.yaml`, default `adws/adw_
 
 `parent_id` nests spans, so an agent phase expands into its tool-call spans in the UI.
 
-**Spend is itemised per phase.** `agent_end.usage` carries tokens *and* dollars for each component pi reports — `input`, `output`, `cache_read`, `cache_write` — summed across every send the phase made, so a phase that retried on a bad envelope or a failed gate shows what all its attempts cost, not just the last one. The four components sum to `total_tokens`, and their costs sum to `total_cost`; the visualizer's Cost panel renders them as a table you can add up by eye.
+**Usage follows schema v2.** `input_tokens` already includes `cached_input_tokens`, and `reasoning_tokens` is already a subset of `output_tokens`; neither is added to `total_tokens` again. `uncached_input_tokens` is present only when the input/cache fields are complete. Retries and failed turns still settle usage. A unique thread/turn settlement prevents resume or duplicate notifications from billing the same turn twice.
 
-`reasoning_tokens` is the thinking share and is **inside** `output_tokens`, not a fifth component — measured across every session on disk, reasoning never exceeds output and the four components always reconcile to the total. It bills at the output rate, so the panel nests it under output rather than adding it. Runs predating the breakdown have no `usage` key at all; the lump `cost` and the event's own `tokens` still stand, and the UI says so rather than rendering zeroes.
+**Unknown cost is not zero.** The current runtime does not provide a reliable amount, so turns record `cost=null, cost_kind=unknown`. `sessions.total_cost` is the known subtotal and `cost_complete` says whether it is a complete total. The terminal and UI show `unknown` whenever completeness is false.
 
-**Context is occupancy, not spend.** `events.tokens` and `sessions.total_tokens` bill every turn, so they only grow — an agent that burned 100k tokens may be sitting in a 15k window. `context_tokens` is how full the window actually was when the agent stopped, which is what the visualizer's per-lane Context bar measures against `context_window`.
-
-It is computed the way pi computes it for its own footer and its auto-compaction trigger (`calculateContextTokens` in the coding agent's `core/compaction/compaction.ts`): take the last *valid* assistant turn — skipping `aborted` and `error` turns — and read `usage.totalTokens`, falling back to `input + output + cacheRead + cacheWrite`. Cache reads count; cached prompt is still prompt. `context_window` is the same `contextWindow` pi reads from `~/.pi/agent/models.json`, so `context_tokens / context_window` is the number pi would show. Both are NULL on rows written before the columns existed, and the lane draws no bar rather than a misleading empty one.
-
-Two caveats worth knowing. Pi adds an *estimate* for any messages trailing the last assistant usage; in a batch (`-p`) run the session ends on that message, so the two agree. And if auto-compaction fires as the very last act of a run, the recorded number is the pre-compaction size — pi itself reports `null` in that window rather than guessing.
+**Context is independent of spend.** Thread cumulative token usage is billing history, not current window occupancy. Until Codex provides an explicit occupancy measurement, `context_tokens` remains NULL and the lane omits its progress bar. `context_window` may still be known, but is never paired with cumulative spend to invent a percentage.
 
 **Gates record evidence, not just a verdict.** A gate returns one `{item, ok, note}` check per thing it looked at, and `violations` are derived from the failed ones. Both land in `gate_results` (`checks_json` + `violations_json`) and in the `gate_pass`/`gate_fail` payload, so a green gate can answer *what did you verify* — `{"item": "…/plan.md", "ok": true, "note": "exists, 454B"}` — rather than only *did it pass*. Rows written before this existed have `checks_json` NULL; treat that as "no evidence recorded", not "nothing checked".
 
@@ -43,18 +39,25 @@ The gate event payload carries `attempt` too, so the `gate_results` table and th
 
 **A `tool_call` is the one event that spans time**, so it fills both `started_at` and `ended_at` on the row — the tool's real start and return. Every other type is a point in time: `started_at` is when it was recorded and `ended_at` stays NULL. Lay tool calls out on a time axis from those columns, never by parsing `payload_json` (`duration_ms` is in the payload too, as pi's own number, but it is a convenience, not the source for layout).
 
-**Streaming is solved by construction.** `agent_pi.py` tails pi's JSONL stdout line by line and the tracer inserts each event into `sssf.db` **while the agent is still working** — never batched at phase end (verified in the first smoke run: tool calls visible mid-run). Everything downstream is a poll → render.
+**Streaming is solved by construction.** The Codex SDK notification stream is serialized to `raw_output.jsonl`; normalized terminal tool events are inserted into `sssf.db` while the turn is running. Unknown notifications stay in the raw stream and increment a diagnostic counter. Everything downstream is a poll → render.
 
 ## Tables
 
 ```sql
+schema_meta (
+  singleton      INTEGER PRIMARY KEY,
+  schema_version INTEGER             -- exactly 2
+);
+
 sessions (
   adw_id        TEXT PRIMARY KEY,
   request       TEXT,              -- the engineer's ask
   status        TEXT,              -- running | success | fail
   engineer      TEXT,
   started_at    TEXT, ended_at TEXT,
-  total_tokens  INTEGER, total_cost REAL
+  total_tokens  INTEGER,
+  total_cost    REAL,               -- known subtotal
+  cost_complete INTEGER             -- 0 when any amount is unknown
 );
 
 phases (
@@ -111,7 +114,8 @@ processes (                        -- adw_id → pid, so a stuck run can be stop
   kind          TEXT,               -- 'adw' (the workflow process) | 'agent' (a coding-agent child)
   name          TEXT,               -- '' for the adw, the agent name for a child
   pid           INTEGER,
-  command       TEXT,               -- what the pid WAS; pids get recycled, so verify before killing
+  start_marker  TEXT,               -- start identity; protects against PID reuse
+  command       TEXT,
   started_at    TEXT, ended_at TEXT -- ended_at NULL = believed alive
 );
 
@@ -119,15 +123,26 @@ agent_sessions (                   -- the queryable mirror of agent_map.json
   adw_id        TEXT REFERENCES sessions,
   agent         TEXT,
   coding_agent  TEXT, model TEXT, color TEXT,   -- color: the config's lane swatch
-  session_id    TEXT,
-  context_tokens INTEGER,           -- window occupancy after the agent's last turn
-  context_window INTEGER,           -- the model's ceiling, from the pi registry
+  session_id    TEXT,                -- Codex thread id (column name retained for UI contract)
+  context_tokens INTEGER,           -- NULL until runtime reports real occupancy
+  context_window INTEGER,
   created_at    TEXT, last_used_at TEXT,
   PRIMARY KEY (adw_id, agent)
 );
+
+agent_invocations (
+  invocation_id TEXT PRIMARY KEY,
+  adw_id TEXT, phase_id TEXT, agent TEXT,
+  thread_id TEXT, turn_id TEXT, status TEXT,
+  sdk_version TEXT, runtime_version TEXT,
+  usage_json TEXT, usage_settled INTEGER,
+  started_at TEXT, ended_at TEXT
+);
 ```
 
-**A hung agent emits nothing**, which is exactly when you need its pid: no events, no tokens, no output to read. `processes` is the only table that can answer "what is this run running, and how do I stop it" — `just procs <adw_id>` lists what is live, `just kill <adw_id>` stops children before the parent, and both verify the recorded `command` still matches the pid before signalling it. A killed run finalizes its own trace: SIGTERM and SIGINT are turned into `SystemExit` in `session.ensure`, so the session lands on `fail` with its process rows closed instead of reading `running` forever.
+The active database must contain `schema_meta.schema_version = 2` and every v2 table. Older or incomplete databases are rejected with an explicit backup-and-recreate message; the runtime never mutates a pre-Codex database in place.
+
+**A hung agent emits nothing**, which is exactly when you need its pid. The runtime records each owned app-server child with PID, command, and start marker; shutdown checks the identity before TERM/KILL so a recycled PID is never targeted. `Codex.close()` gets a grace period, after which owned children are terminated. A killed run finalizes its own trace: SIGTERM and SIGINT become `SystemExit`, so the session lands on `fail` with process rows closed.
 
 **Derived, never stored:** phase durations (`ended_at − started_at`), session phase-progress (query `phases` by `adw_id`), lane layout (`kind` + `owner`).
 

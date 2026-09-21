@@ -65,7 +65,7 @@ simple-sdlc *ARGS:
 
 # the last 10 runs
 sessions:
-    @sqlite3 {{db}} "select adw_id, status, substr(request,1,50), total_tokens, round(total_cost,4) from sessions order by started_at desc limit 10;"
+    @sqlite3 {{db}} "select adw_id, status, substr(request,1,50), total_tokens, case when cost_complete=1 then printf('$%.4f', total_cost) else 'unknown' end from sessions order by started_at desc limit 10;"
 
 # phase status in sequence: just phases <adw_id>
 phases ADW_ID:
@@ -77,7 +77,7 @@ tail ADW_ID:
 
 # what a run has alive right now, with pids: just procs <adw_id>
 procs ADW_ID:
-    @sqlite3 {{db}} "select kind, name, pid, command, started_at from processes where adw_id='{{ADW_ID}}' and ended_at is null order by id;"
+    @sqlite3 {{db}} "select kind, name, pid, start_marker, command, started_at from processes where adw_id='{{ADW_ID}}' and ended_at is null order by id;"
 
 # ── observability UI ────────────────────────────────────────────────────────
 

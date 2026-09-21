@@ -38,7 +38,9 @@ export interface Session {
   started_at: string | null;
   ended_at: string | null;
   total_tokens: number | null;
+  /** Known cost subtotal. Complete only when cost_complete is 1. */
   total_cost: number | null;
+  cost_complete: number | null;
   /** 1 once archived out of the review list. Review state, not run state. */
   archived: number | null;
 }
@@ -165,25 +167,25 @@ export interface AgentSession {
 export interface AgentStartPayload {
   model?: string;
   thinking?: string;
-  session_id?: string;
+  thread_id?: string;
+  invocation_id?: string;
   color?: string;
   coding_agent?: string;
   purpose?: string;
-  /** Tool allowlist; null means all tools. Absent on pre-config-payload rows. */
-  tools?: string[] | null;
-  harness_engineering?: string[];
+  config_fingerprint?: string;
+  subagents_enabled?: boolean;
 }
 
 /**
- * Tokens and dollars per component for one agent phase, summed across every
- * send it made (a retried phase paid more than once). Mirrors pi's `usage`:
- * `input_tokens` EXCLUDES cache reads, which bill at their own rate.
+ * Codex usage schema v2. Cached input is already part of input_tokens and
+ * reasoning is already part of output_tokens; neither is added to total.
  */
 export interface UsageBreakdown {
+  usage_schema_version: 2;
   input_tokens: number;
+  cached_input_tokens: number;
+  uncached_input_tokens: number | null;
   output_tokens: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
   /**
    * Thinking tokens — the reasoning SHARE of `output_tokens`, not a fifth
    * component. Billed at the output rate; adding it to the others would
@@ -191,21 +193,22 @@ export interface UsageBreakdown {
    */
   reasoning_tokens?: number;
   total_tokens: number;
-  input_cost: number;
-  output_cost: number;
-  cache_read_cost: number;
-  cache_write_cost: number;
-  total_cost: number;
+  cost: number | null;
+  cost_kind: "reported" | "estimated" | "unknown";
 }
 
 /** Parsed `agent_end` payload — closes out a call with its cost and context use. */
 export interface AgentEndPayload {
-  cost?: number;
+  status?: "success" | "failed";
+  cost?: number | null;
+  cost_kind?: "reported" | "estimated" | "unknown";
   /** Absent on runs predating the breakdown; `cost` alone survives there. */
   usage?: UsageBreakdown;
   /** Window occupancy after the final turn, and the model's ceiling. */
-  context_tokens?: number;
-  context_window?: number;
+  context_tokens?: number | null;
+  context_window?: number | null;
+  thread_id?: string | null;
+  turn_id?: string | null;
 }
 
 /**
@@ -215,7 +218,12 @@ export interface AgentEndPayload {
  */
 export interface ToolCallPayload {
   tool?: string;
-  tool_call_id?: string;
+  item_id?: string;
+  item_type?: string;
+  thread_id?: string;
+  turn_id?: string;
+  invocation_id?: string;
+  status?: string;
   args?: Record<string, unknown>;
   result_snippet?: string;
   ok?: boolean;
@@ -236,10 +244,16 @@ export type SessionsResponse = SessionSummary[];
  * cached re-read, which is the same context charged again on each turn.
  */
 export interface SessionUsage {
-  /** Raw prompt tokens read for the first time: new input + cache writes. */
+  /** Uncached input when the runtime supplied a complete split. */
   read: number;
-  /** Tokens generated. Each produced exactly once, so this needs no adjusting. */
+  /** Cached input, already included in input. */
+  cached: number;
+  /** Total input, including cached input. */
+  input: number;
+  /** Tokens generated. */
   written: number;
+  /** Reasoning subset of written. */
+  reasoning: number;
 }
 
 export interface SessionDetail {

@@ -68,7 +68,7 @@ const agentConfig = computed(() => {
 interface UsageRow {
   label: string
   tokens: number
-  cost: number
+  cost: number | null
   /** Total gets a rule above it; reasoning is indented under output. */
   kind?: 'total' | 'nested'
   title?: string
@@ -96,37 +96,49 @@ const phaseUsage = computed<{ rows: UsageRow[]; partial: boolean } | null>(() =>
     // Pre-breakdown run: the event's own token count and the lump cost still hold.
     return {
       partial: true,
-      rows: [{ label: 'total', tokens: end.tokens ?? 0, cost: payload.cost ?? 0, kind: 'total' }],
+      rows: [{ label: 'total', tokens: end.tokens ?? 0, cost: payload.cost ?? null, kind: 'total' }],
     }
   }
   const rows: UsageRow[] = [
-    { label: 'input', tokens: u.input_tokens, cost: u.input_cost },
-    { label: 'output', tokens: u.output_tokens, cost: u.output_cost },
+    { label: 'input', tokens: u.input_tokens, cost: null },
   ]
+  if (u.cached_input_tokens) {
+    rows.push({
+      label: 'cached input',
+      tokens: u.cached_input_tokens,
+      cost: null,
+      kind: 'nested',
+      title: 'Cached input is already included in input above. Not added to the total.',
+    })
+  }
+  if (u.uncached_input_tokens != null) {
+    rows.push({
+      label: 'uncached input',
+      tokens: u.uncached_input_tokens,
+      cost: null,
+      kind: 'nested',
+      title: 'Uncached input is the non-cached subset of input above.',
+    })
+  }
+  rows.push({ label: 'output', tokens: u.output_tokens, cost: null })
   if (u.reasoning_tokens) {
-    // Thinking bills at the output rate, so its share of the output cost is
-    // exact arithmetic — but it is already INSIDE the output row above.
-    const share = u.output_tokens ? (u.output_cost * u.reasoning_tokens) / u.output_tokens : 0
     rows.push({
       label: 'thinking',
       tokens: u.reasoning_tokens,
-      cost: share,
+      cost: null,
       kind: 'nested',
-      title: 'Thinking tokens — part of output above, billed at the output rate. Not added to the total.',
+      title: 'Thinking tokens are part of output above. Not added to the total.',
     })
   }
-  rows.push(
-    { label: 'cache read', tokens: u.cache_read_tokens, cost: u.cache_read_cost },
-    { label: 'cache write', tokens: u.cache_write_tokens, cost: u.cache_write_cost },
-    { label: 'total', tokens: u.total_tokens, cost: u.total_cost, kind: 'total' },
-  )
+  rows.push({ label: 'total', tokens: u.total_tokens, cost: u.cost, kind: 'total' })
   return { rows, partial: false }
 })
 
 const NUM = new Intl.NumberFormat('en-US')
 
 /** Per-component costs run to fractions of a cent; four places keeps them real. */
-function money(n: number): string {
+function money(n: number | null, total = false): string {
+  if (n == null) return total ? 'unknown' : '—'
   if (!n) return '$0'
   return n < 0.0001 ? '<$0.0001' : `$${n.toFixed(4)}`
 }
@@ -410,29 +422,15 @@ function togglePanel(id: string) {
                 {{ agentConfig.thinking }}
               </span>
             </div>
-            <div v-if="agentConfig.tools !== undefined" class="cfg-row">
-              <span class="cfg-k">tools</span>
-              <span v-if="agentConfig.tools === null" class="cfg-v">all tools</span>
-              <span v-else class="cfg-chips">
-                <span v-for="t in agentConfig.tools" :key="t" class="cfg-chip">{{ t }}</span>
-              </span>
-            </div>
-            <div v-if="agentConfig.harness_engineering !== undefined" class="cfg-row">
-              <span class="cfg-k">harness</span>
-              <span v-if="!agentConfig.harness_engineering?.length" class="cfg-v dim">none</span>
-              <span v-else class="cfg-chips">
-                <span v-for="h in agentConfig.harness_engineering" :key="h" class="cfg-chip">{{ h }}</span>
-              </span>
-            </div>
             <div v-if="agentConfig.purpose" class="cfg-row">
               <span class="cfg-k">purpose</span>
               <span class="cfg-v">{{ agentConfig.purpose }}</span>
             </div>
-            <div v-if="agentConfig.session_id" class="cfg-row">
-              <span class="cfg-k">session</span>
+            <div v-if="agentConfig.thread_id" class="cfg-row">
+              <span class="cfg-k">thread</span>
               <span class="cfg-chip">
                 <Fingerprint class="cfg-icon" :size="18" :stroke-width="2" />
-                {{ agentConfig.session_id }}
+                {{ agentConfig.thread_id }}
               </span>
             </div>
           </div>
@@ -575,12 +573,12 @@ function togglePanel(id: string) {
               >
                 <td class="u-k">{{ r.label }}</td>
                 <td class="u-n">{{ NUM.format(r.tokens) }}</td>
-                <td class="u-c">{{ money(r.cost) }}</td>
+                <td class="u-c">{{ money(r.cost, r.kind === 'total') }}</td>
               </tr>
             </tbody>
           </table>
           <p v-if="phaseUsage.partial" class="faint u-note">
-            this run predates the per-component breakdown — only the total was recorded
+            no schema-v2 usage breakdown was recorded for this invocation
           </p>
         </DetailSection>
 
