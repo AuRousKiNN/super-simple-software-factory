@@ -392,9 +392,9 @@ def test_json_and_gate_repairs_reuse_one_thread(tmp_path: Path, monkeypatch) -> 
         gate_calls += 1
         return ["summary must be fixed"] if gate_calls == 1 else []
 
-    monkeypatch.setattr("adw_modules.agents_codex.permissions.snapshot", lambda _run: {})
+    monkeypatch.setattr("adw_modules.agents.permissions.snapshot", lambda _run: {})
     monkeypatch.setattr(
-        "adw_modules.agents_codex.permissions.enforce",
+        "adw_modules.agents.permissions.enforce",
         lambda *_args, **_kwargs: [],
     )
     envelope = agents.execute(
@@ -442,7 +442,7 @@ def test_failed_turn_with_valid_json_is_not_accepted(tmp_path: Path, monkeypatch
             description="Exercise the failed runtime path.",
         ),
     )
-    monkeypatch.setattr("adw_modules.agents_codex.permissions.snapshot", lambda _run: {})
+    monkeypatch.setattr("adw_modules.agents.permissions.snapshot", lambda _run: {})
     with pytest.raises(agents.AgentRuntimeFailure, match="ended as failed"):
         agents.execute(
             run,

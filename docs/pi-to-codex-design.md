@@ -1,11 +1,12 @@
 # SSSF：从 Pi 迁移到 Codex 的设计
 
-状态：迁移设计稿；M0 已完成；M1、M2、M3 代码与确定性验收已完成。M3 的真实合成
-smoke 已验证两个 child 的生命周期与只读无残留；逐 child 的 custom role 加载证明及真实完整
-SDLC 因需要明确的数据外发和用量授权而待执行；M4 尚未实施。
-核对日期：2026-09-21。M2/M3 证据见
+状态：迁移设计稿；M0–M4 代码与确定性验收已完成。M3 的真实合成 smoke 已验证两个
+child 的生命周期与只读无残留；逐 child 的 custom role 加载证明及真实完整 SDLC 因需要
+明确的数据外发和用量授权而待执行。M4 已完成分发、保护性更新/回退和活动集成清理。
+核对日期：2026-09-22。M2/M3/M4 证据见
 [`codex-sdk-m2-report.md`](codex-sdk-m2-report.md) 与
-[`codex-sdk-m3-report.md`](codex-sdk-m3-report.md)。
+[`codex-sdk-m3-report.md`](codex-sdk-m3-report.md)、
+[`codex-sdk-m4-report.md`](codex-sdk-m4-report.md)。
 
 M0 的版本锁、真实能力验证、脱敏事件样本和未覆盖能力见
 [`codex-sdk-m0-report.md`](codex-sdk-m0-report.md)。
@@ -415,9 +416,11 @@ sessions/<adw_id>/
 | M1：核心运行替换（代码与确定性验收已完成） | 适配器、配置 v2、会话映射、schema 与重试 | JSON 修复、gate 修复及失败终态保护已通过 fake transport；真实单 agent smoke 待明确授权后执行；生产路径没有 Pi 运行依赖 |
 | M2：权限与观察（代码与确定性验收已完成） | 内容快照、异常收尾、进程清理、DB/UI 更新 | dirty/untracked/mode/symlink/index 恢复、失败 turn 收尾、事件去重、用量差分、费用完整性、DB v2 拒绝旧库及 Visualizer 构建已通过；真实禁用子代理完整 SDLC 待数据外发授权 |
 | M3：子代理和完整链路（代码与确定性验收已完成，真实验收部分完成） | planner/scout 子代理策略、prompt 更新 | 角色配置、并发、递归关闭、父级等待/强制收尾、父子事件和 usage 归属已通过 fake transport；真实合成 smoke 已验证两个 child 生命周期与只读无残留，但逐 child 角色标记仍待授权复验；plan → build → test → review → document 确定性链路通过，真实完整 SDLC 待数据外发和用量授权 |
-| M4：分发与清理 | installer/生成器/文档、Pi 删除清单 | 全新安装、已有目标文件保护、重复执行、Codex 版本回退及 Pi 集成零残留检查通过 |
+| M4：分发与清理（已完成） | installer/生成器/文档、Pi 删除清单 | 全新安装、已有目标文件保护、重复执行、事务失败还原、Codex 版本回退、生成 ADW 启动及 Pi 活动集成零残留检查已通过 |
 
-基础迁移的完成线是 M0、M1、M2、M4，并且第 10.4 节的 Pi 清理验收全部通过；保留原 planner/scout 子代理能力的完整替换还需要 M3。若分两次发布，首版必须明确说明子代理暂时关闭。任何发布都不得以保留 Pi 后端作为子代理缺口的兜底。
+基础迁移完成线 M0、M1、M2、M4 与第 10.4 节清理验收均已通过；planner/scout 子代理的
+确定性替换和一次真实合成 smoke 也已完成。剩余真实逐 child 角色标记和完整 SDLC 只属于
+联网/用量授权后的补充证据，不改变当前分发只有 Codex 运行时、没有旧后端兜底的事实。
 
 需要覆盖的关键测试：
 
@@ -439,4 +442,7 @@ M3 使用项目级只读 custom agent，并在 child 角色自己的 config laye
 PID + 启动标识继续负责异常收尾，必要时只终止身份仍匹配的所属 app-server。完整能力证据和
 限制见 [`codex-sdk-m0-report.md`](codex-sdk-m0-report.md)、
 [`codex-sdk-m2-report.md`](codex-sdk-m2-report.md) 与
-[`codex-sdk-m3-report.md`](codex-sdk-m3-report.md)。
+[`codex-sdk-m3-report.md`](codex-sdk-m3-report.md)。M4 将单一 Codex 执行实现收敛到
+`agents.py`，删除旧扩展和覆盖式旧权限实现；installer 使用摘要 manifest、用户/受管文件分类、
+写前快照、原子替换和安全回退。确定性分发证据见
+[`codex-sdk-m4-report.md`](codex-sdk-m4-report.md)。

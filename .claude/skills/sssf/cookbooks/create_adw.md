@@ -6,7 +6,7 @@ Compose a new ADW script — a thin, deterministic Python workflow over agents a
 
 Answer four questions, in order:
 
-1. **What agents, in what order?** Pick from the roster (`adws/adw_sssf_config/sssf.config.yaml`). The starter six cover most chains:
+1. **What agents, in what order?** Pick from the roster (`adws/adw_sssf_config/sssf.config.yaml`). The five starter agents cover most chains:
 
 | Agent | Use when | Output type | Typical gates |
 |---|---|---|---|
@@ -37,7 +37,7 @@ Answer four questions, in order:
 - `kind="code"` → `owner` is a short actor label (`"git"`, `"db"`); all code phases share the code lane.
 - Phase `name` must be unique within the run (`plan`, `build`, `test_1`, `fix_1`, …) — the UI keys blocks on it.
 - **`description` is required and must earn its place.** The name identifies the phase; the description explains it — what this phase does and why, in one sentence. It rides the `phase_start` event and is the only line of intent the trace, the console, and the phase block ever show. `PhaseParams` raises at construction on a blank description *or* one that merely restates the name (`commit_plan: "Commit the plan"`), so the rule fails before the phase opens rather than leaving an unreadable run in the db. Write `"Put the spec on record before any code exists to blur it"` instead.
-- `retries=N` on an **agent** phase = extra gate-correction rounds re-sent into the same session (pi's `--session-id` creates-or-continues, so context stays intact). Code-phase re-execution is not implemented in v1.
+- `retries=N` on an **agent** phase = extra gate-correction rounds submitted as new turns on the same Codex thread, so context stays intact. Code-phase re-execution is a workflow-level loop, not a phase retry.
 
 ## Step 3 — Generate or write it
 
@@ -54,7 +54,7 @@ Every `adw_*.py`, generated or hand-written, is a `uv` single-file script with t
 ```python
 #!/usr/bin/env -S uv run
 # /// script
-# dependencies = ["pydantic", "python-dotenv", "pyyaml", "rich"]
+# dependencies = ["openai-codex==0.155.1", "pydantic", "python-dotenv", "pyyaml", "rich"]
 # ///
 """ADW Plan Build — plan the request, then implement the plan."""
 

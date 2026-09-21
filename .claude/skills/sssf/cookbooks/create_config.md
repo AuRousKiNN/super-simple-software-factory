@@ -1,61 +1,50 @@
-# Create Config
+# Create the roster
 
-Generate `sssf.config.yaml` — the agent roster for a target repo.
-
-## Generate it
+Prefer the generator:
 
 ```bash
 uv run .claude/skills/sssf/scripts/make_config.py
 ```
 
-Writes `adws/adw_sssf_config/sssf.config.yaml` — creating the directory if needed — with the starter agents (planner, builder, scout, reviewer, documenter) wired to the prompt files `/sssf install` stamped into `adws/adw_data/prompt_engineering/`. That path is the default every ADW and the justfile look for; `--config` overrides it. `make_config.py` refuses to overwrite an existing config unless you pass `--force`, so retuning an existing roster is a hand edit — see `update_config.md`.
+It writes the strict schema-v2 starter config and the project-scoped
+`sssf_recon` child role. It refuses to overwrite an existing config unless the
+engineer explicitly passes `--force`.
 
-## The rule
-
-**One agent, one prompt, one purpose.** An entry defines who an agent *is*: its coding agent, model, thinking level, and exactly one system prompt plus one user prompt. How it gets *used* — the output type, a per-call user prompt override — lives at the ADW call site, never here.
-
-## Schema
+Minimal shape:
 
 ```yaml
-defaults:
-  coding_agent: pi                 # v1: pi only (claude_code is specced, stubbed until v2)
-  model: google/gemini-3.6-flash   # ALWAYS provider/model-id — a bare id is ambiguous
-  thinking: medium                 # off | minimal | low | medium | high | xhigh | max
-  harness_engineering: []          # pi extension names
-  data_dir: adws/adw_data          # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
+schema_version: 2
 
-observability:
-  db: adws/adw_data/sssf.db        # tracer writes here; the UI polls it
-  poll_ms: 500                     # visualizer live-poll cadence
+defaults:
+  coding_agent: codex
+  model: gpt-5.6-terra
+  thinking: medium
+  data_dir: adws/adw_data
+  subagents:
+    enabled: false
+    max_concurrent: 6
+    role: sssf_recon
+    config_file: .codex/agents/sssf_recon.toml
+
+codex:
+  auth: cli
+  approval_policy: never
+  turn_timeout_s: 900
+  startup_timeout_s: 30
+  shutdown_grace_s: 10
+  command_network_access: false
 
 agents:
-  - name: planner                  # ADW scripts name agents, never models
-    coding_agent: pi
-    model: google/gemini-3.6-flash
-    thinking: high
-    color: "#a78bfa"               # optional hex — this agent's lane color in the visualizer
-    purpose: Turn a request into a plan the builder can implement without asking questions.
+  - name: builder
+    purpose: Implement the requested change and report every modified file.
     prompt_engineering:
-      system: adws/adw_data/prompt_engineering/planner/system.md
-      user: adws/adw_data/prompt_engineering/planner/user.md
-
-  - name: scout
-    thinking: high                 # unset keys fall through to defaults
-    purpose: Find and report where things live; change nothing.
-    prompt_engineering:
-      system: adws/adw_data/prompt_engineering/scout/system.md
-      user: adws/adw_data/prompt_engineering/scout/user.md
-    tools:                         # optional allowlist — omit the key entirely for all tools
-      - read
-      - bash
+      system: adws/adw_data/prompt_engineering/builder/system.md
+      user: adws/adw_data/prompt_engineering/builder/user.md
 ```
 
-Every agent entry merges over `defaults`, so an entry only states what differs. Pi's builtin tools are `read`, `bash`, `edit`, `write` — a read-only recon agent gets `[read, bash]`; a builder omits `tools` altogether.
+Use a direct Codex model ID. The runtime preflights model and reasoning-effort
+support. Do not add provider catalog syntax or a backend fallback.
 
-## After generating
-
-1. Each agent needs its prompt pair to exist on disk: `adws/adw_data/prompt_engineering/{name}/system.md` and `user.md`. `agents.validate()` fails the run at startup if either is missing.
-2. Write `purpose` as one sentence and make the system prompt say the same thing — the two should not drift.
-3. Validate by running the smallest ADW that names your agents; a bad entry fails fast, before anything spawns.
-
-Full field-by-field spec, thinking-level mapping, and model resolution: `references/config.md`. Retuning an existing roster: `update_config.md`.
+Every config object rejects unknown keys. Lists replace inherited lists; an
+explicit `writes: []` is read-only, while omitted or `null` means unrestricted
+except for `protected_files`.

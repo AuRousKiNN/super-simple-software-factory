@@ -165,7 +165,6 @@ def typecheck(run) -> QualityCheckResult:
 
 
 def build(run) -> QualityCheckResult:
-    output_dir = _check_dir(run, "build") / "bundle"
     return _run(QualityCheckSpec(
         name="build",
         area="backend",

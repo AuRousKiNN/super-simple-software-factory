@@ -43,7 +43,7 @@ Location comes from `observability.db` in `sssf.config.yaml`, default `adws/adw_
 
 The gate event payload carries `attempt` too, so the `gate_results` table and the event stream are equivalent sources — a live consumer can group gate results per correction round from events alone, without a second query.
 
-**A `tool_call` is the one event that spans time**, so it fills both `started_at` and `ended_at` on the row — the tool's real start and return. Every other type is a point in time: `started_at` is when it was recorded and `ended_at` stays NULL. Lay tool calls out on a time axis from those columns, never by parsing `payload_json` (`duration_ms` is in the payload too, as pi's own number, but it is a convenience, not the source for layout).
+**A `tool_call` is the one event that spans time**, so it fills both `started_at` and `ended_at` on the row — the tool's real start and return. Every other type is a point in time: `started_at` is when it was recorded and `ended_at` stays NULL. Lay tool calls out on a time axis from those columns, never by parsing `payload_json`; `duration_ms` is only a convenience.
 
 **Streaming is solved by construction.** The Codex SDK notification stream is serialized to `raw_output.jsonl`; normalized terminal tool events are inserted into `sssf.db` while the turn is running. Unknown notifications stay in the raw stream and increment a diagnostic counter. Everything downstream is a poll → render.
 

@@ -52,7 +52,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
     previous = None
 {phases}
-    return 0 if run.succeeded else 1
+    return run.finish()
 
 
 if __name__ == "__main__":
