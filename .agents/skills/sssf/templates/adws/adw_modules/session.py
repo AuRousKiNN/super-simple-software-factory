@@ -7,6 +7,7 @@ minted and printed so the next ADW can pick it up.
 
 from __future__ import annotations
 
+import atexit
 import os
 import signal
 import sys
@@ -28,8 +29,11 @@ def _finalize_when_killed(run: Run) -> None:
     already dead. Turning the signal into SystemExit both finalizes here and
     lets the phase context manager record the phase as failed on the way out.
     """
+    # Keep the workspace lock until agent permission restoration has unwound.
+    # A signal outside a phase still gets final process cleanup at interpreter exit.
+    atexit.register(run.close)
+
     def handler(signum, _frame):
-        run.close()
         run.tracer.session_finish(run.adw_id, ok=False)   # also closes process rows
         raise SystemExit(128 + signum)
 

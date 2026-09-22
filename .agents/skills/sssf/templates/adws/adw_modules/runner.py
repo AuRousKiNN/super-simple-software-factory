@@ -197,6 +197,7 @@ class Run:
         """
         phases_ok = bool(self.phases) and all(p.status == "success" for p in self.phases)
         ok = phases_ok and accepted
+        self.accepted = ok
         if phases_ok and not accepted:
             note = reason or "the run's acceptance criterion was not met"
             self.tracer.event(EventRecord(

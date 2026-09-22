@@ -54,7 +54,7 @@ only the current invocation report and declared context-handoff artifacts there.
 
 `enabled`, `max_concurrent`, `role`, and `config_file` are the only fields.
 `max_concurrent` is 1–6. The starter distribution permits opt-in only for
-planner and scout. The role file is validated before any business turn.
+planner, scout and decomposer. The role file is validated before any business turn.
 
 ## Observability
 

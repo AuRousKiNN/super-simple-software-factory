@@ -29,7 +29,7 @@ from typing import Literal
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 SSSF_SKILL = Path(__file__).resolve().parent.parent / "SKILL.md"
-DISTRIBUTION_VERSION = "m4-codex-sdk-0.155.1"
+DISTRIBUTION_VERSION = "tickets-v1-codex-sdk-0.155.1"
 MANIFEST_PATH = Path(".sssf/manifest.json")
 BACKUP_ROOT = Path(".sssf/backups")
 
@@ -531,6 +531,10 @@ def main(argv: list[str] | None = None) -> int:
     for relative in preserved:
         print(f"  = kept {relative}")
     print(f"  rollback snapshot: {snapshot_id}")
+    print("\nticket contract upgrade: preserved roster/prompts/ADWs need an explicit merge.")
+    print("  Add decomposer + recon; planner spec_path; builder/reviewer {{work_item}};")
+    print("  concrete output types and unchanged work_item in repair/review calls.")
+    print("  See .agents/skills/sssf/cookbooks/install.md and references/tickets.md.")
     print("\nnext steps:")
     print("  1. codex --version && codex login status")
     print("  2. just demo")

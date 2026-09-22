@@ -49,7 +49,7 @@ role's work itself.
 
 Deep references: [configuration](references/config.md),
 [handoffs](references/handoff.md), and
-[observability](references/observability.md).
+[observability](references/observability.md), and [tickets](references/tickets.md).
 
 ## Hard rules
 
@@ -74,7 +74,7 @@ Deep references: [configuration](references/config.md),
     interruption, and cancellation.
 11. Only the current report directory and `context_handoff/` are automatic
     runtime write exceptions; `data_dir` is not a blanket exception.
-12. Only planner and scout may enable child agents. Children are read-only,
+12. Only planner, scout and decomposer may enable child agents. Children are read-only,
     cannot recurse, cannot load this orchestrator skill, and must all terminate
     before parent acceptance.
 13. Every ADW ends with `run.finish()`, optionally passing an explicit

@@ -13,8 +13,8 @@ Phases: engineer(request) -> <agent>
 import argparse
 import sys
 
-from adw_modules import agents, session, utils
-from adw_modules.data_types import AgentCall, GenericOutput, PhaseParams
+from adw_modules import agents, session, tickets, utils
+from adw_modules.data_types import AgentCall, BUILTIN_OUTPUT_TYPES, GenericOutput, PhaseParams
 
 
 def main(prompt: str, agent: str = "builder",
@@ -27,9 +27,13 @@ def main(prompt: str, agent: str = "builder",
                                description="Capture the incoming ask")) as ph:
         ph.log(input=prompt)
 
+    if agent == "decomposer":
+        tickets.decompose(run, prompt)
+        return run.finish()
+
     with run.phase(PhaseParams(name="prompt", kind="agent", owner=agent,
                                description=f"Send the request straight to {agent} and parse its envelope")) as ph:
-        ph.call(AgentCall(output_type=GenericOutput, prompt=prompt))
+        ph.call(AgentCall(output_type=BUILTIN_OUTPUT_TYPES.get(agent, GenericOutput), prompt=prompt))
 
     return run.finish()
 
@@ -41,4 +45,5 @@ if __name__ == "__main__":
     parser.add_argument("--config", default="adws/adw_sssf_config/sssf.config.yaml")
     parser.add_argument("--adw-id", default=None, help="join or pin an existing session")
     args = parser.parse_args()
-    sys.exit(main(utils.resolve_prompt(args.prompt), args.agent, args.config, args.adw_id))
+    sys.exit(main(args.prompt if args.agent == "decomposer" else utils.resolve_prompt(args.prompt),
+                  args.agent, args.config, args.adw_id))

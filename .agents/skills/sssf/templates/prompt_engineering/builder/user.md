@@ -6,6 +6,10 @@
 
 {{prompt}}
 
+### work_item
+
+{{work_item}}
+
 ### previous_envelope
 
 {{previous_envelope}}

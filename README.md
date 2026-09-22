@@ -162,7 +162,7 @@ written into prompts, traces, config snapshots, or process arguments. A custom
 
 ## Agents, envelopes, and gates
 
-The starter roster contains `planner`, `builder`, `scout`, `reviewer`, and
+The starter roster contains `planner`, `decomposer`, `builder`, `scout`, `reviewer`, and
 `documenter`. There is no tester agent: a known command belongs in a deterministic
 `kind="code"` phase.
 
@@ -182,7 +182,7 @@ report example, and the call site's `output_type=`. Change all three together.
 
 ## Child agents
 
-Only planner and scout enable child agents in the starter config. The installed
+Only planner, scout and decomposer enable child agents in the starter config. The installed
 `sssf_recon` role is read-only, disables recursive child creation, and disables
 the SSSF orchestrator skill. A parent may run at most six children, must give
 each a bounded investigation task, and must wait for all children to terminate
@@ -276,3 +276,27 @@ See `docs/pi-to-codex-design.md` for the migration rationale and
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Optional ticket decomposition
+
+Planner archives a complete root spec and returns `PlanOutput.spec_path`.
+Decomposer turns that spec into a versioned `ticket-set.md` and one Markdown
+file per ticket. Python reads the planning metadata and atomically derives `index.json`. It checks
+source binding and dependency relationships, without validating artifact formatting.
+
+```bash
+uv run adws/adw_plan_decompose.py "add query and export capabilities"
+uv run adws/adw_decompose.py --spec specs/example.md
+uv run adws/adw_build.py --spec specs/example.md
+uv run adws/adw_build.py --ticket specs/example.tickets/r1/tickets/TICKET-QUERY.md \
+  --ticket-set specs/example.tickets/r1/ticket-set.md
+```
+
+Use a new session for each ticket. Repairs retain the same work item and thread;
+changed definitions require revalidation and a new session. A ticket with blockers
+also needs `--dependency-evidence` referencing host acceptance records. Core accepts
+only evidence for the exact current implementation baseline; a custom ADW must
+revalidate evidence after baseline or environment changes. The build entry reports
+implementation only. The ADW owns checks, manual obligations and final acceptance.
+See [the ticket contract](.agents/skills/sssf/references/tickets.md) and
+[upgrade instructions](.agents/skills/sssf/cookbooks/install.md).

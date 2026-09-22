@@ -79,14 +79,14 @@ def _install_role(tmp_path: Path) -> Path:
     return role
 
 
-def test_m3_config_enables_only_planner_and_scout_and_validates_child_role(
+def test_config_enables_recon_parents_and_validates_child_role(
     tmp_path: Path, monkeypatch,
 ) -> None:
     template = agents.load_config(
         str(ROOT / ".agents/skills/sssf/templates/sssf.config.yaml")
     )
     assert {agent.name for agent in template.agents if agent.subagents.enabled} == {
-        "planner", "scout",
+        "planner", "scout", "decomposer",
     }
     assert all(agent.subagents.max_concurrent <= 6 for agent in template.agents)
 
@@ -417,7 +417,7 @@ class _PhaseHandle:
         if self.params.owner == "planner":
             return PlanOutput(
                 status="success", summary="planned", artifacts=["plan.md", "spec.md"],
-                commit_message="添加计划",
+                commit_message="添加计划", spec_path="spec.md",
             )
         if self.params.owner == "builder":
             return BuildOutput(
@@ -455,8 +455,10 @@ class _Run:
         return 0 if accepted else 1
 
 
-def test_complete_sdlc_chain_reaches_documentation(monkeypatch) -> None:
+def test_complete_sdlc_chain_reaches_documentation(monkeypatch, tmp_path) -> None:
     run = _Run()
+    run.repo_root = tmp_path
+    (tmp_path / "spec.md").write_text("REQ-01: required behavior. AC-01: observable result.")
     monkeypatch.setattr(adw_simple_sdlc.agents, "load_config", lambda _path: object())
     monkeypatch.setattr(adw_simple_sdlc.agents, "validate", lambda *_args: None)
     monkeypatch.setattr(adw_simple_sdlc.session, "ensure", lambda *_args: run)
@@ -487,7 +489,7 @@ def test_complete_sdlc_chain_reaches_documentation(monkeypatch) -> None:
 
     assert adw_simple_sdlc.main("build it") == 0
     assert [phase.name for phase in run.phases] == [
-        "request", "plan", "commit_plan", "build", "test_1",
+        "request", "plan", "commit_plan", "spec_input", "build", "test_1",
         "changes_review_1", "review_1", "commit_build", "changes", "document",
         "commit_docs",
     ]

@@ -6,7 +6,7 @@ defaults:
   model: gpt-5.6-terra             # exact Codex model id; availability is preflighted
   thinking: medium                 # none|minimal|low|medium|high|xhigh|max|ultra
   subagents:
-    enabled: false                 # opt in only on planner/scout; other roles stay single-threaded
+    enabled: false                 # opt in only on planner/scout/decomposer; other roles stay single-threaded
     max_concurrent: 6
     role: sssf_recon
     config_file: .codex/agents/sssf_recon.toml
@@ -41,7 +41,7 @@ agents:
   - name: planner
     thinking: high
     color: "#a78bfa"                 # optional hex — the agent's lane color in the visualizer
-    purpose: Turn a request into a plan the builder can implement without asking questions.
+    purpose: Turn a request into a grounded, self-contained plan with observable acceptance criteria.
     prompt_engineering:
       system: adws/adw_data/prompt_engineering/planner/system.md
       user: adws/adw_data/prompt_engineering/planner/user.md
@@ -50,9 +50,24 @@ agents:
     writes:                        # the plan is the only thing it may leave in the repo
       - specs/
 
+  - name: decomposer
+    thinking: high
+    color: "#34d399"
+    purpose: Decompose a complete spec into verifiable tickets with real dependencies.
+    prompt_engineering:
+      system: adws/adw_data/prompt_engineering/decomposer/system.md
+      user: adws/adw_data/prompt_engineering/decomposer/user.md
+    subagents:
+      enabled: true
+      max_concurrent: 6
+      role: sssf_recon
+      config_file: .codex/agents/sssf_recon.toml
+    writes:
+      - "specs/*.tickets/**"
+
   - name: builder
     color: "#22d3ee"
-    purpose: Implement the plan exactly; report every changed file in the envelope.
+    purpose: Implement the bound spec or ticket and report the implementation outcome.
     prompt_engineering:
       system: adws/adw_data/prompt_engineering/builder/system.md
       user: adws/adw_data/prompt_engineering/builder/user.md

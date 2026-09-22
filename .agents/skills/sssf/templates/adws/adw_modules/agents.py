@@ -10,7 +10,7 @@ from typing import Optional
 
 import yaml
 
-from . import permissions, prompts
+from . import permissions, prompts, tickets
 from .agent_codex import SDK_VERSION, RuntimeHooks
 from .codex_events import SubagentTracker, ToolCallTracker
 from .codex_schema import strict_output_schema
@@ -20,6 +20,7 @@ from .data_types import (
     AgentRunRequest,
     AgentRunResult,
     EnvelopeBase,
+    DecomposeOutput,
     EventRecord,
     GateCheck,
     GateReport,
@@ -32,7 +33,7 @@ from .utils import new_id
 
 JSON_FIX_ATTEMPTS = 2
 MAX_TURNS_PER_PHASE = 12
-_SUBAGENT_PARENT_ROLES = {"planner", "scout"}
+_SUBAGENT_PARENT_ROLES = {"planner", "scout", "decomposer"}
 _INHERITED_AGENT_FIELDS = (
     "coding_agent", "model", "thinking", "color", "writes",
 )
@@ -87,7 +88,7 @@ def validate(cfg: SSSFConfig, required: list[str]) -> None:
     problems = []
     if cfg.defaults.subagents.enabled:
         problems.append(
-            "defaults.subagents.enabled must be false; enable only planner/scout explicitly"
+            "defaults.subagents.enabled must be false; enable only planner/scout/decomposer explicitly"
         )
     if cfg.codex.command_network_access:
         problems.append("codex.command_network_access=true is not supported in M1")
@@ -97,7 +98,7 @@ def validate(cfg: SSSFConfig, required: list[str]) -> None:
             continue
         if configured.name not in _SUBAGENT_PARENT_ROLES:
             problems.append(
-                f"agent {configured.name!r}: only planner/scout may enable subagents"
+                f"agent {configured.name!r}: only planner/scout/decomposer may enable subagents"
             )
         role_file = configured.subagents.config_file
         if role_file not in checked_role_files:
@@ -190,8 +191,34 @@ def _subagent_role_problems(agent: AgentConfig) -> list[str]:
 
 
 def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
+    """Clear per-call policy even when preflight or prompt rendering fails."""
+    try:
+        return _execute(run, phase, call)
+    finally:
+        run.active_report_dir = None
+        run.active_readonly_paths = []
+        run.active_write_scope = None
+        run.active_decomposition = None
+
+
+def _execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     """Render prompts, run bounded Codex turns, validate gates, return envelope."""
     agent = resolve(run.cfg, phase.params.owner)
+    # Bind before rendering or resuming any runtime thread.
+    item, protected = tickets.bind_work_item(run, call, agent.name)
+    if agent.name == "decomposer":
+        if call.decomposition is None:
+            raise tickets.TicketError("decomposer requires a bound source; use adw_decompose --spec")
+        if call.output_type is not DecomposeOutput:
+            raise tickets.TicketError("decomposer requires DecomposeOutput")
+        tickets.verify_ref(run.repo_root, call.decomposition.spec)
+        expected = tickets.prepare_decomposition(run, call.decomposition.spec.path)
+        if expected != call.decomposition:
+            raise tickets.TicketError("decomposition input differs from the host binding")
+    call = call.model_copy(update={"work_item": item, "gates": list(call.gates)})
+    run.active_readonly_paths = protected + ([call.decomposition.spec.path] if call.decomposition else [])
+    run.active_decomposition = call.decomposition
+    run.active_write_scope = call.decomposition.output_dir + "/" if call.decomposition else None
     agent_dir = run.session_dir / agent.name
     agent_dir.mkdir(parents=True, exist_ok=True)
     invocation_id = f"inv_{new_id(12)}"
@@ -203,6 +230,8 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
 
     variables = {
         "prompt": call.prompt,
+        "work_item": item.model_dump_json(indent=2) if item else "(none; use the direct request)",
+        "decomposition": call.decomposition.model_dump_json(indent=2) if call.decomposition else "(none)",
         "previous_envelope": (
             call.previous.model_dump_json(indent=2) if call.previous else "(none)"
         ),
@@ -428,6 +457,10 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
         result = send(user_text)
         envelope, attempt = _parse_with_retries(run, phase, call, result, send)
 
+        if envelope.status == "fail":
+            _persist_envelope(run, phase, agent.name, call, envelope, attempt, valid=True)
+            raise RuntimeError(f"{agent.name} reported status='fail': {envelope.summary}")
+
         for gate_attempt in range(1, max(1, phase.params.retries + 1) + 1):
             violations = []
             for gate in call.gates:
@@ -467,6 +500,9 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
                 + "\n\nFix these problems, then re-emit ONLY your Report JSON."
             )
             envelope, attempt = _parse_with_retries(run, phase, call, result, send)
+            if envelope.status == "fail":
+                _persist_envelope(run, phase, agent.name, call, envelope, attempt, valid=True)
+                raise RuntimeError(f"{agent.name} reported status='fail': {envelope.summary}")
 
         check_permissions(log_paths=True)
 
@@ -498,6 +534,9 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             if cleanup_snapshot:
                 cleanup_snapshot()
             run.active_report_dir = None
+            run.active_readonly_paths = []
+            run.active_write_scope = None
+            run.active_decomposition = None
         context = latest or AgentRunResult(thread_id=thread_id)
         if thread_id:
             run.tracer.agent_session_row(

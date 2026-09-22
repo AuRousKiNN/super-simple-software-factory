@@ -12,6 +12,7 @@ Answer four questions, in order:
 |---|---|---|---|
 | `scout` | you need to FIND something first — read-only recon | `ScoutOutput` | `artifacts_exist` |
 | `planner` | the work needs a plan before code changes | `PlanOutput` | `artifacts_exist`, `files_non_empty` |
+| `decomposer` | an explicit root spec needs delivery tickets | `DecomposeOutput` | code index phase; no artifact format gate |
 | `builder` | code must change | `BuildOutput` | none; capture the result with a code phase |
 | `reviewer` | the change must be confirmed to BE what was asked for | `ReviewOutput` | `artifacts_exist`, `verdict_consistent` |
 | *(no tester)* | verifying that it RUNS is a `kind="code"` phase over `quality.py`, not an agent | `QualityResult` → `as_envelope` | the exit code is the check |
@@ -117,3 +118,16 @@ if __name__ == "__main__":
 1. `uv run adws/adw_<name>.py "a tiny real request"` — watch it go green end to end.
 2. Check the trace: `sqlite3 adws/adw_data/sssf.db "select seq,name,kind,owner,status from phases where adw_id='<id>' order by seq;"`
 3. Read the final `envelope.json` — is the output type earning its fields, or should it be sharper?
+
+## Optional decomposition
+
+Use `tickets.decompose(run, plan.spec_path)` (or an explicit spec path) to bind
+source bytes, run decomposer without artifact format gates, then generate
+the index in a code phase. Include decomposer in REQUIRED_AGENTS. A following
+builder must select a ticket with `tickets.select_ticket(run, output, selection)`;
+never interpret list order as a chosen target. `make_adw` generates this selection
+and an explicit `--ticket-id` option for decomposer → builder chains.
+
+Pass the same work_item to all builder repairs and reviews; keep latest feedback
+in previous. Generated skeletons honor review.approved in run.finish but do not
+publish dependency acceptance without the ADW's actual checks and obligations.

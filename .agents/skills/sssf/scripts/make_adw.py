@@ -18,7 +18,7 @@ import argparse
 import sys
 from pathlib import Path
 
-OUTPUT_TYPES = {"planner": "PlanOutput", "builder": "BuildOutput",
+OUTPUT_TYPES = {"planner": "PlanOutput", "decomposer": "DecomposeOutput", "builder": "BuildOutput",
                 "scout": "ScoutOutput",
                 "reviewer": "ReviewOutput", "documenter": "DocumentOutput"}
 
@@ -37,13 +37,13 @@ Phases: engineer(request) -> {chain}
 import argparse
 import sys
 
-from adw_modules import agents, changes, gates, git_helper, session, utils
-from adw_modules.data_types import AgentCall, ChangeCapture, PhaseParams, {imports}
+from adw_modules import agents, changes, gates, git_helper, session, tickets, utils
+from adw_modules.data_types import AgentCall, ChangeCapture, PhaseParams, TicketSelection, {imports}
 
 REQUIRED_AGENTS = {agents_list}
 
 
-def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw_id: str | None = None) -> int:
+def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw_id: str | None = None, selection: TicketSelection | None = None) -> int:
     cfg = agents.load_config(config)
     agents.validate(cfg, REQUIRED_AGENTS)
     run = session.ensure(cfg, adw_id)
@@ -54,8 +54,11 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         ph.log(input=prompt)
 
     previous = None
+    source_spec = prompt
+    work_item = None
+    accepted = True
 {phases}
-    return run.finish()
+    return run.finish(accepted=accepted, reason="a generated review did not approve the selected target")
 
 
 if __name__ == "__main__":
@@ -63,15 +66,18 @@ if __name__ == "__main__":
     parser.add_argument("prompt", help="inline text or a path to a prompt file")
     parser.add_argument("--config", default="adws/adw_sssf_config/sssf.config.yaml")
     parser.add_argument("--adw-id", default=None, help="join or pin an existing session")
+    parser.add_argument("--ticket-id", help="explicit ticket selected after decomposition")
+    parser.add_argument("--dependency-evidence")
     args = parser.parse_args()
-    sys.exit(main(utils.resolve_prompt(args.prompt), args.config, args.adw_id))
+    selection = TicketSelection(ticket_id=args.ticket_id, dependency_evidence=args.dependency_evidence) if args.ticket_id else None
+    sys.exit(main({prompt_expression}, args.config, args.adw_id, selection))
 '''
 
 PHASE = '''    # TODO: replace this description — say what THIS phase does and why.
     with run.phase(PhaseParams(name="{name}", kind="agent", owner="{agent}",
                                description="Run {agent} over the request and hand its envelope on")) as ph:
         previous = ph.call(AgentCall(output_type={output_type}, prompt=prompt,
-                                     previous=previous,
+                                     previous=previous, work_item=work_item,
                                      gates=[gates.artifacts_exist]))
 '''
 
@@ -102,10 +108,23 @@ def main() -> int:
     types = [OUTPUT_TYPES.get(a, "GenericOutput") for a in agent_names]
     seen: dict[str, int] = {}
     phases = []
-    for agent, output_type in zip(agent_names, types):
+    for position, (agent, output_type) in enumerate(zip(agent_names, types)):
         seen[agent] = seen.get(agent, 0) + 1
         phase_name = agent if seen[agent] == 1 else f"{agent}_{seen[agent]}"
-        phases.append(PHASE.format(name=phase_name, agent=agent, output_type=output_type))
+        if agent == "decomposer":
+            phases.append('    previous = tickets.decompose(run, source_spec)\n')
+            if "builder" in agent_names[position + 1:]:
+                phases.append('    with run.phase(PhaseParams(name="select_ticket", kind="code", owner="tickets", description="Validate explicit ticket selection and prerequisite evidence")) as ph:\n'
+                              '        work_item = tickets.select_ticket(run, previous, selection)\n'
+                              '        ph.log(work_item=work_item.model_dump())\n')
+        else:
+            phases.append(PHASE.format(name=phase_name, agent=agent, output_type=output_type))
+        if agent == "reviewer":
+            phases.append('    accepted = accepted and previous.approved\n')
+        if agent == "planner":
+            phases.append('    source_spec = previous.spec_path\n')
+        if agent == "planner" and "decomposer" not in agent_names:
+            phases.append('    work_item = tickets.spec_work_item(run.repo_root, previous.spec_path)\n')
         if agent == "builder":
             phases.append(CHANGES_PHASE.format(name=f"changes_after_{phase_name}"))
 
@@ -119,7 +138,8 @@ def main() -> int:
         title=args.name.replace("_", " ").title(),
         name=args.name,
         chain=" -> ".join(chain),
-        imports=", ".join(sorted(set(types))),
+        imports=", ".join(sorted(set(types) | {"PlanOutput"})),
+        prompt_expression=("args.prompt" if "decomposer" in agent_names and "planner" not in agent_names[:agent_names.index("decomposer")] else "utils.resolve_prompt(args.prompt)"),
         agents_list=repr(sorted(set(agent_names))),
         build_base=('    build_base = git_helper.rev("HEAD")'
                     if "builder" in agent_names else ""),

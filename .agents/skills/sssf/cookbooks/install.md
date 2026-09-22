@@ -58,3 +58,23 @@ uv run adws/adw_prompt.py "summarize this repo" --agent scout
 
 A green smoke means config preflight, thread creation, structured output,
 permissions, gates, and SQLite tracing all completed.
+
+## Upgrading to ticket decomposition
+
+The installer preserves existing roster, prompts and starter ADWs. It ships new
+files and prints this merge checklist; there is no silent legacy-contract fallback.
+Before invoking a new workflow:
+
+1. Merge the decomposer entry from templates/sssf.config.yaml, including its
+   planning writes and enabled read-only recon role. Keep builder children disabled.
+2. Merge planner prompts: full root spec with stable REQ/CONTRACT/AC IDs and the
+   authoritative `spec_path` in PlanOutput. Move ticket ownership to decomposer.
+3. Merge builder/reviewer prompts: render `{{work_item}}`, preserve target on every
+   repair, and treat root/set/index as read-only. Merge new decomposer prompts.
+4. Merge customized ADWs: use concrete output types, construct SpecWorkItem after
+   planning, preserve it for fixes/review, and select an explicit ticket after
+   decomposition. Add required roster entries and `run.finish()` acceptance.
+5. Validate the merged config and contracts using an isolated spec → decomposition
+   → single-ticket smoke. A changed prompt fingerprint requires a new session.
+
+Detailed schemas and prerequisite evidence format: [ticket contract](../references/tickets.md).

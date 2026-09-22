@@ -18,7 +18,8 @@ payload with Pydantic. Unknown fields are rejected.
 When parsing fails, the invalid output is persisted separately and the same
 thread receives a bounded correction. A valid envelope is written to the
 invocation directory and copied to `<role>/envelope.json` as the latest-valid
-compatibility view. Failed output never replaces that view.
+compatibility view. Malformed output never replaces that view. A valid status=fail envelope is
+persisted with its concrete blocker before the phase terminates.
 
 Gate violations follow the same-thread correction path. Permission violations
 do not: they terminate the phase immediately after restoration.
@@ -60,3 +61,5 @@ unknown-outcome, and child-policy failures are distinct. They preserve received
 events and usage, run write verification, and close the invocation. A crash
 whose side effects cannot be determined becomes `outcome_unknown` and requires
 explicit recovery before another mutating turn.
+
+Ticket/spec work items and DecomposeOutput follow the [ticket contract](tickets.md).

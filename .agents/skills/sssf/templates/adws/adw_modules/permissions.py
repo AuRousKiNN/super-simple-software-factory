@@ -80,6 +80,7 @@ class WorkspaceSnapshot:
     index_path: Optional[Path]
     backup_dir: Path
     backup_names: dict[str, str] = field(default_factory=dict)
+    extra_patterns: list[str] = field(default_factory=list)
 
     def cleanup(self) -> None:
         shutil.rmtree(self.backup_dir, ignore_errors=True)
@@ -198,7 +199,10 @@ def snapshot(run) -> WorkspaceSnapshot:
     backup_dir = Path(tempfile.mkdtemp(prefix=f"sssf-{run.adw_id}-permissions-"))
     files: dict[str, FileState] = {}
     names: dict[str, str] = {}
-    for number, relative in enumerate(_listed_paths(root)):
+    extra_patterns = _extra_patterns(run)
+    extra_files = {p.relative_to(root).as_posix() for pattern in extra_patterns
+                   for p in root.glob(pattern) if p.is_file() or p.is_symlink()}
+    for number, relative in enumerate(sorted(set(_listed_paths(root)) | set(_input_paths(run)) | extra_files)):
         state = _file_state(root / relative)
         if state is None:
             state = FileState(kind="missing", mode=0, digest="")
@@ -213,11 +217,13 @@ def snapshot(run) -> WorkspaceSnapshot:
     if index_path and index is not None:
         names[INDEX_PATH] = "git-index"
         _copy_to_backup(index_path, backup_dir / "git-index", index)
-    return WorkspaceSnapshot(root, files, index, index_path, backup_dir, names)
+    return WorkspaceSnapshot(root, files, index, index_path, backup_dir, names, extra_patterns)
 
 
 def _current_states(before: WorkspaceSnapshot) -> dict[str, FileState]:
     paths = set(before.files) | set(_listed_paths(before.root))
+    paths.update(p.relative_to(before.root).as_posix() for pattern in before.extra_patterns
+                 for p in before.root.glob(pattern) if p.is_file() or p.is_symlink())
     return {
         relative: _file_state(before.root / relative)
         or FileState(kind="missing", mode=0, digest="")
@@ -264,12 +270,53 @@ def always_writable(run) -> list[str]:
     return allowed
 
 
+def _host_patterns(run) -> list[str]:
+    root = Path(run.repo_root).resolve()
+    sessions = Path(run.cfg.defaults.data_dir) / "sessions"
+    if not sessions.is_absolute():
+        sessions = root / sessions
+    if not sessions.resolve().is_relative_to(root):
+        return []
+    prefix = sessions.resolve().relative_to(root).as_posix()
+    return [f"{prefix}/*/{name}" for name in
+            ("work_item.json", "decomposition.json", "ticket-acceptance.json")]
+
+
+def _extra_patterns(run) -> list[str]:
+    patterns = _host_patterns(run)
+    scope = getattr(run, "active_write_scope", None)
+    if scope:
+        patterns.append(scope + "**/*")
+    return patterns
+
+
+def _input_paths(run) -> list[str]:
+    paths = list(getattr(run, "active_readonly_paths", []))
+    root = Path(run.repo_root).resolve()
+    sessions = Path(run.cfg.defaults.data_dir) / "sessions"
+    if not sessions.is_absolute():
+        sessions = root / sessions
+    for name in ("work_item.json", "decomposition.json", "ticket-acceptance.json"):
+        for path in sessions.glob(f"*/{name}"):
+            if path.resolve().is_relative_to(root):
+                paths.append(path.relative_to(root).as_posix())
+    return paths
+
+
 def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig, run=None) -> bool:
     if path == INDEX_PATH:
         return False
     normalized = _normalize_repo_path(path)
+    if run is not None and (normalized in getattr(run, "active_readonly_paths", [])
+                            or any(_matches(normalized, p) for p in _host_patterns(run))):
+        return False
     if run is not None and any(_matches(normalized, item) for item in always_writable(run)):
         return True
+    scope = getattr(run, "active_write_scope", None) if run is not None else None
+    if scope and not _matches(normalized, scope):
+        return False
+    if scope and normalized == scope + "index.json":
+        return False
     if any(_matches(normalized, item) for item in (agent.writes or [])):
         return True
     if any(_matches(normalized, item) for item in cfg.defaults.protected_files):

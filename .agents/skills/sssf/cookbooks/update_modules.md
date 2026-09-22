@@ -9,6 +9,7 @@ Low-level behavior belongs in `adws/adw_modules/`. Keep ADW entry points thin.
 | `agent_codex.py` | SDK clients, preflight, thread/turn lifecycle, cancel and close |
 | `codex_events.py` | notification normalization, tool and child tracking, usage deltas |
 | `codex_schema.py` | verified Pydantic-to-runtime schema subset |
+| `tickets.py` | planning metadata, indexes, evidence, work-item binding |
 | `permissions.py` | content snapshots, write contracts, safe restoration |
 | `runner.py` | phase lifecycle, atomic thread mapping, totals, finish verdict |
 | `session.py` | session creation, recovery, signals, runtime shutdown |

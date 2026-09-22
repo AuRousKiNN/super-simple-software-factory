@@ -37,7 +37,7 @@ automatic runtime exceptions.
 
 ## Child agents
 
-Only planner and scout may opt in:
+Only planner, scout and decomposer may opt in:
 
 ```yaml
 subagents:
@@ -48,8 +48,8 @@ subagents:
 ```
 
 The role file must live under `.codex/agents/`, use a read-only sandbox, disable
-recursive child creation, and disable the SSSF skill. Do not enable child agents
-for a writing role.
+recursive child creation, and disable the SSSF skill. Keep child agents disabled for builder, reviewer and documenter. Decomposer
+children investigate read-only; the parent owns planning writes.
 
 ## Authentication and network
 

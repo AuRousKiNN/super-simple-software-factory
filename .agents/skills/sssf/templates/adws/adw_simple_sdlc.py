@@ -44,7 +44,7 @@ pinned before the first commit phase and printed in the request phase.
 import argparse
 import sys
 
-from adw_modules import agents, changes, gates, git_helper, quality, session, utils
+from adw_modules import agents, changes, gates, git_helper, quality, session, tickets, utils
 from adw_modules.data_types import (AgentCall, BuildOutput, ChangeCapture,
                                     DocumentOutput, PhaseParams, PlanOutput,
                                     ReviewOutput)
@@ -104,9 +104,14 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                description="Put the spec on record before any code exists to blur it")) as ph:
         build_base = commit(ph, plan)
 
+    with run.phase(PhaseParams(name="spec_input", kind="code", owner="tickets",
+                               description="Bind the archived root spec for implementation and all repairs")) as ph:
+        work_item = tickets.spec_work_item(run.repo_root, plan.spec_path)
+        ph.log(work_item=work_item.model_dump())
+
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
                                description="Implement the plan exactly")) as ph:
-        build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan))
+        build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, work_item=work_item, previous=plan))
 
     test = None
     for i in range(1, MAX_FIX_LOOPS + 1):
@@ -122,7 +127,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         with run.phase(PhaseParams(name=f"fix_{i}", kind="agent", owner="builder", retries=1,
                                    description="Repair what the suite reported, from its "
                                                "verbatim output")) as ph:
-            build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
+            build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, work_item=work_item,
                                       previous=quality.as_envelope(test, "tests")))
 
     review = None
@@ -134,7 +139,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
         with run.phase(PhaseParams(name=f"review_{i}", kind="agent", owner="reviewer",
                                    description="Confirm the build matches the plan")) as ph:
-            review = ph.call(AgentCall(output_type=ReviewOutput, prompt=prompt, previous=review_input,
+            review = ph.call(AgentCall(output_type=ReviewOutput, prompt=prompt, work_item=work_item, previous=review_input,
                                        gates=[gates.artifacts_exist, gates.verdict_consistent]))
 
         if review.approved or i == MAX_REVISION_LOOPS:
@@ -142,7 +147,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
         with run.phase(PhaseParams(name=f"revise_{i}", kind="agent", owner="builder", retries=1,
                                    description="Close the reviewer's blocking findings")) as ph:
-            build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=review))
+            build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, work_item=work_item, previous=review))
             revised = True
 
     # A revision edited code after the suite last ran, so the green light is

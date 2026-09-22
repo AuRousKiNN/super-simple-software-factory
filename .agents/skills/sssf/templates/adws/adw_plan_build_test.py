@@ -17,7 +17,7 @@ builder as an envelope, and only an exhausted fix loop fails the run.
 import argparse
 import sys
 
-from adw_modules import agents, gates, git_helper, quality, session, utils
+from adw_modules import agents, gates, git_helper, quality, session, tickets, utils
 from adw_modules.data_types import AgentCall, BuildOutput, PhaseParams, PlanOutput
 
 REQUIRED_AGENTS = ["planner", "builder"]
@@ -43,9 +43,14 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         plan = ph.call(AgentCall(output_type=PlanOutput, prompt=prompt,
                                  gates=[gates.artifacts_exist, gates.files_non_empty]))
 
+    with run.phase(PhaseParams(name="spec_input", kind="code", owner="tickets",
+                               description="Bind the archived root spec for implementation and all repairs")) as ph:
+        work_item = tickets.spec_work_item(run.repo_root, plan.spec_path)
+        ph.log(work_item=work_item.model_dump())
+
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
                                description="Implement the plan exactly")) as ph:
-        previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
+        previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, work_item=work_item, previous=plan,
                                      gates=[gates.artifacts_exist]))
 
     test = None
@@ -62,7 +67,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         with run.phase(PhaseParams(name=f"fix_{i}", kind="agent", owner="builder", retries=1,
                                    description="Repair what the suite reported, from its "
                                                "verbatim output")) as ph:
-            previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
+            previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, work_item=work_item,
                                          previous=quality.as_envelope(test, "tests"),
                                          gates=[gates.artifacts_exist]))
 

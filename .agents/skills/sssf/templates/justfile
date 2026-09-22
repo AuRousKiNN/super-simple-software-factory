@@ -48,6 +48,18 @@ scout *ARGS:
 plan *ARGS:
     uv run adws/adw_plan.py --config {{config}} "$@"
 
+# decompose an archived spec: just decompose --spec specs/example.md
+decompose *ARGS:
+    uv run adws/adw_decompose.py --config {{config}} "$@"
+
+# request to root spec and validated tickets: just plan-decompose "add export"
+plan-decompose *ARGS:
+    uv run adws/adw_plan_decompose.py --config {{config}} "$@"
+
+# direct request, whole spec, or explicit ticket implementation
+build *ARGS:
+    uv run adws/adw_build.py --config {{config}} "$@"
+
 # planner, builder, commit: just plan-build "add a /health endpoint"
 plan-build *ARGS:
     uv run adws/adw_plan_build.py --config {{config}} "$@"

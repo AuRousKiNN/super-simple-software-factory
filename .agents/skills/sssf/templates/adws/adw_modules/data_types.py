@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Literal, Optional, Type
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 PhaseKind = Literal["engineer", "agent", "code"]
 PhaseStatus = Literal["queued", "running", "success", "fail"]
@@ -85,11 +85,73 @@ class GenericOutput(EnvelopeBase):
 
 
 class PlanOutput(EnvelopeBase):
+    spec_path: str = ""
+
     # Subject for committing the PLAN — the spec file the planner wrote, not the
     # implementation it describes. Each agent's commit_message covers its own
     # work product, so a chain that commits per step never reuses one agent's
     # words for another agent's diff.
     commit_message: str = ""
+
+
+class DecomposeOutput(EnvelopeBase):
+    ticket_set_path: str = ""
+    outcome: Literal["ready", "needs_spec_revision", "needs_decision", "artifact_error"]
+    commit_message: str = ""
+
+    @model_validator(mode="after")
+    def consistent_outcome(self):
+        if (self.status == "success") != (self.outcome == "ready"):
+            raise ValueError("success requires ready; other outcomes require fail")
+        if self.status == "success" and not self.ticket_set_path:
+            raise ValueError("ready requires ticket_set_path")
+        return self
+
+
+class ArtifactRef(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    path: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SpecWorkItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["spec"] = "spec"
+    spec: ArtifactRef
+
+
+class TicketWorkItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["ticket"] = "ticket"
+    spec: ArtifactRef
+    ticket_set: ArtifactRef
+    ticket: ArtifactRef
+    index: ArtifactRef
+    ticket_id: str
+    definition_sha256: str
+    dependency_evidence: list[ArtifactRef] = Field(default_factory=list)
+
+
+class DecompositionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    spec: ArtifactRef
+    output_dir: str
+    revision: int = Field(ge=1)
+
+
+class AcceptanceRecord(BaseModel):
+    """Host-issued, conservative evidence valid on one implementation baseline."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    schema_version: Literal[1] = 1
+    accepted: Literal[True] = True
+    adw_id: str
+    ticket_id: str
+    definition_sha256: str
+    baseline: str
+    checks: list[ArtifactRef] = Field(min_length=1)
+    reviews: list[ArtifactRef] = Field(min_length=1)
+    manual_validation: list[ArtifactRef] = Field(default_factory=list)
+    applicability: str = Field(min_length=1)
 
 
 class BuildOutput(EnvelopeBase):
@@ -296,6 +358,8 @@ class AgentCall(BaseModel):
     output_type: Type[EnvelopeBase]
     prompt: str
     previous: Optional[EnvelopeBase] = None
+    work_item: SpecWorkItem | TicketWorkItem | None = Field(default=None, discriminator="kind")
+    decomposition: DecompositionInput | None = None
     gates: list[Callable] = Field(default_factory=list)   # gate(envelope, run) -> list[str]
 
 
@@ -511,3 +575,32 @@ class AgentRunResult(BaseModel):
     subagents: list[SubagentRun] = Field(default_factory=list)
     child_usage_attribution: ChildUsageAttribution = "not_applicable"
     subagent_cleanup_forced: bool = False
+
+
+class BuildInput(BaseModel):
+    prompt: str = ""
+    spec: str | None = None
+    ticket: str | None = None
+    ticket_set: str | None = None
+    dependency_evidence: str | None = None
+
+    @model_validator(mode="after")
+    def exclusive_mode(self):
+        if sum(bool(v) for v in (self.prompt, self.spec, self.ticket)) != 1:
+            raise ValueError("provide exactly one of prompt, --spec or --ticket")
+        if bool(self.ticket) != bool(self.ticket_set):
+            raise ValueError("--ticket and --ticket-set must be supplied together")
+        if self.dependency_evidence and not self.ticket:
+            raise ValueError("--dependency-evidence requires --ticket")
+        return self
+
+
+BUILTIN_OUTPUT_TYPES = {
+    "planner": PlanOutput, "decomposer": DecomposeOutput, "builder": BuildOutput,
+    "scout": ScoutOutput, "reviewer": ReviewOutput, "documenter": DocumentOutput,
+}
+
+
+class TicketSelection(BaseModel):
+    ticket_id: str
+    dependency_evidence: str | None = None

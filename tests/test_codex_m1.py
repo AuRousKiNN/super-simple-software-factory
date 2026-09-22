@@ -100,7 +100,7 @@ agents:
     assert template.schema_version == 2
     assert {agent.coding_agent for agent in template.agents} == {"codex"}
     enabled = {agent.name for agent in template.agents if agent.subagents.enabled}
-    assert enabled == {"planner", "scout"}
+    assert enabled == {"planner", "scout", "decomposer"}
 
     config.write_text(legacy.replace("coding_agent: pi", "coding_agent: codex", 1)
                       + "unknown_root: true\n")

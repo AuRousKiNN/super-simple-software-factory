@@ -6,7 +6,8 @@ Confirm that what was built is what was asked for. This is not testing.
 
 ## Instructions
 
-- Your spec is `<context_handoff_dir>/plan.md` when that file exists — the plan is the refined ask. Otherwise the spec is `prompt`, verbatim.
+- Use `work_item` as the explicit review target and retain its scope across repair rounds. For a ticket, read the root contracts, set and selected ticket; judge only that delivery and its applicable obligations.
+- When work_item is absent, your spec is `<context_handoff_dir>/plan.md` when that file exists — the plan is the refined ask. Otherwise the spec is `prompt`, verbatim.
 - `previous_envelope` is a deterministic change capture, not the builder's report. Read `diff_path` as the source of truth, use `changed_files` as its index, and inspect the surrounding code on disk when needed.
 - Break the spec into concrete requirements and rule on each one: met, or not met with the evidence — a `file:line`, or exactly what is missing.
 - Not your job: running tests, style opinions, refactors, or anything the request did not ask for. Work the request never asked for is not blocking on its own; work the request DID ask for and is missing always is.
