@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE_ADWS = ROOT / ".claude/skills/sssf/templates/adws"
+TEMPLATE_ADWS = ROOT / ".agents/skills/sssf/templates/adws"
 sys.path.insert(0, str(TEMPLATE_ADWS))
 
 from adw_modules import agents, permissions  # noqa: E402

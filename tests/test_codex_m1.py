@@ -10,7 +10,7 @@ import pytest
 from pydantic import BaseModel, Field, ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE_ADWS = ROOT / ".claude/skills/sssf/templates/adws"
+TEMPLATE_ADWS = ROOT / ".agents/skills/sssf/templates/adws"
 sys.path.insert(0, str(TEMPLATE_ADWS))
 
 from adw_modules import agents  # noqa: E402
@@ -95,7 +95,7 @@ agents:
         agents.load_config(str(config))
 
     template = agents.load_config(
-        str(ROOT / ".claude/skills/sssf/templates/sssf.config.yaml")
+        str(ROOT / ".agents/skills/sssf/templates/sssf.config.yaml")
     )
     assert template.schema_version == 2
     assert {agent.coding_agent for agent in template.agents} == {"codex"}

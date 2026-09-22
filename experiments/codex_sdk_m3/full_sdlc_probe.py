@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-INSTALLER = ROOT / ".claude/skills/sssf/scripts/install.py"
+INSTALLER = ROOT / ".agents/skills/sssf/scripts/install.py"
 
 
 def _run(argv: list[str], cwd: Path, *, timeout: int = 120) -> subprocess.CompletedProcess:

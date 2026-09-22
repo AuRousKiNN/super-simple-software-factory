@@ -3,7 +3,7 @@
 Prefer the generator:
 
 ```bash
-uv run .claude/skills/sssf/scripts/make_config.py
+uv run .agents/skills/sssf/scripts/make_config.py
 ```
 
 It writes the strict schema-v2 starter config and the project-scoped

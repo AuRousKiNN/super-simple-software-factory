@@ -3,7 +3,7 @@
 Run from the target repository root:
 
 ```bash
-uv run .claude/skills/sssf/scripts/install.py
+uv run .agents/skills/sssf/scripts/install.py
 ```
 
 Prerequisites are Python 3.10+, `uv`, Git, SQLite, and authenticated Codex CLI
@@ -25,7 +25,7 @@ failure restores the pre-install state automatically.
 After reviewing a managed conflict:
 
 ```bash
-uv run .claude/skills/sssf/scripts/install.py --force-managed
+uv run .agents/skills/sssf/scripts/install.py --force-managed
 ```
 
 This option does not overwrite user-owned files. Merge updated config or prompt
@@ -35,7 +35,7 @@ To return to the immediately preceding verified distribution, first stop all
 workflows and then run:
 
 ```bash
-uv run .claude/skills/sssf/scripts/install.py --rollback latest
+uv run .agents/skills/sssf/scripts/install.py --rollback latest
 ```
 
 Rollback refuses when any captured file changed after installation. That guard

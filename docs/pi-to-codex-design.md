@@ -22,9 +22,9 @@ M0 的版本锁、真实能力验证、脱敏事件样本和未覆盖能力见
 
 ## 1. 当前实现与迁移边界
 
-当前分支是工厂的分发包，没有已经安装到根目录的 `adws/`。实际修改对象在 `.claude/skills/sssf/`，之后由 `scripts/install.py` 安装到目标仓库。只修改一个已安装仓库的 `adw_modules`，不会完成本项目的迁移。
+当前分支是工厂的分发包，没有已经安装到根目录的 `adws/`。实际修改对象在 `.agents/skills/sssf/`，之后由 `scripts/install.py` 安装到目标仓库。只修改一个已安装仓库的 `adw_modules`，不会完成本项目的迁移。
 
-下表路径以 `.claude/skills/sssf/` 为基准。
+下表路径以 `.agents/skills/sssf/` 为基准。
 
 | 当前位置 | 已确认的实现 | 迁移要求 |
 |---|---|---|
@@ -43,7 +43,7 @@ M0 的版本锁、真实能力验证、脱敏事件样本和未覆盖能力见
 
 本次保持 ADW 调用入口 `ph.call(AgentCall(...))`、角色名称、工作流顺序和业务 envelope 字段。测试、质量检查和 commit 继续是 `kind="code"` 阶段。
 
-`.claude/skills/sssf/` 是目前的分发位置，不是 Pi 的运行时目录。首轮保留该位置和现有安装命令；让 Codex 直接发现并调用这个管理 skill，属于分发入口适配，可单独实施，避免同时更改所有资源路径和 visualizer 启动路径。
+`.agents/skills/sssf/` 是目前的通用 Agent 分发位置，不是 Pi 的运行时目录。Codex 可直接发现并调用这个管理 skill；统一使用与具体供应商无关的目录名，避免把分发入口绑定到单一 Agent 产品。
 
 ## 2. 接入方式选择
 

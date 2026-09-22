@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE_ADWS = ROOT / ".claude/skills/sssf/templates/adws"
+TEMPLATE_ADWS = ROOT / ".agents/skills/sssf/templates/adws"
 sys.path.insert(0, str(TEMPLATE_ADWS))
 
 from adw_modules.agent_codex import CodexRuntime, RuntimeHooks  # noqa: E402
@@ -39,12 +39,12 @@ def _snapshot(workspace: Path) -> dict[str, str]:
 
 
 def _install_role(workspace: Path) -> None:
-    source = ROOT / ".claude/skills/sssf/templates/codex_agents/sssf_recon.toml"
+    source = ROOT / ".agents/skills/sssf/templates/codex_agents/sssf_recon.toml"
     destination = workspace / ".codex/agents/sssf_recon.toml"
     destination.parent.mkdir(parents=True)
     destination.write_text(source.read_text().replace(
         "{{sssf_skill_path_toml}}",
-        json.dumps(str(ROOT / ".claude/skills/sssf/SKILL.md")),
+        json.dumps(str(ROOT / ".agents/skills/sssf/SKILL.md")),
     ))
     shutil.copymode(source, destination)
 

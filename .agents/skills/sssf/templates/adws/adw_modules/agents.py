@@ -178,7 +178,7 @@ def _subagent_role_problems(agent: AgentConfig) -> list[str]:
         if (
             skill_path.is_absolute()
             and skill_path.is_file()
-            and skill_path.as_posix().endswith(".claude/skills/sssf/SKILL.md")
+            and skill_path.as_posix().endswith(".agents/skills/sssf/SKILL.md")
         ):
             sssf_disabled = True
             break

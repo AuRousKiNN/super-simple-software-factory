@@ -22,11 +22,11 @@ Prerequisites:
 - `just` for the included recipes, optional
 - Bun only for the visualizer
 
-Copy `.claude/skills/sssf/` into the target repository, then run from the target
+Copy `.agents/skills/sssf/` into the target repository, then run from the target
 root:
 
 ```bash
-uv run .claude/skills/sssf/scripts/install.py
+uv run .agents/skills/sssf/scripts/install.py
 git init
 just demo
 ```
@@ -42,10 +42,10 @@ file stops the install before any write:
 
 ```bash
 # After reviewing the reported conflict; the update creates a pre-write backup:
-uv run .claude/skills/sssf/scripts/install.py --force-managed
+uv run .agents/skills/sssf/scripts/install.py --force-managed
 
 # Stop workflows first; rollback refuses if captured files changed afterwards.
-uv run .claude/skills/sssf/scripts/install.py --rollback latest
+uv run .agents/skills/sssf/scripts/install.py --rollback latest
 ```
 
 `--force` is retained as an alias for `--force-managed`; it never overwrites
@@ -202,7 +202,7 @@ just simple-sdlc "run plan, build, test, review, and document"
 Generate a thin workflow from the configured roster:
 
 ```bash
-uv run .claude/skills/sssf/scripts/make_adw.py \
+uv run .agents/skills/sssf/scripts/make_adw.py \
   --name review_docs --agents scout,reviewer
 ```
 
@@ -261,7 +261,7 @@ uv run --with openai-codex==0.155.1 --with pytest --with pydantic \
 The visualizer is verified separately:
 
 ```bash
-cd .claude/skills/sssf/apps/visualizer
+cd .agents/skills/sssf/apps/visualizer
 npm run build
 npm run lint
 ```

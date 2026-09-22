@@ -40,7 +40,7 @@ def _repo_root() -> Path:
 
 
 def _load_envelope_types(repo_root: Path) -> dict[str, type[BaseModel]]:
-    template_root = repo_root / ".claude/skills/sssf/templates/adws"
+    template_root = repo_root / ".agents/skills/sssf/templates/adws"
     sys.path.insert(0, str(template_root))
     from adw_modules.data_types import (
         BuildOutput,

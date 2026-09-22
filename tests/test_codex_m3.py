@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE_ADWS = ROOT / ".claude/skills/sssf/templates/adws"
+TEMPLATE_ADWS = ROOT / ".agents/skills/sssf/templates/adws"
 sys.path.insert(0, str(TEMPLATE_ADWS))
 
 import adw_simple_sdlc  # noqa: E402
@@ -38,7 +38,7 @@ from adw_modules.data_types import (  # noqa: E402
 
 
 ROLE_TEMPLATE = (
-    ROOT / ".claude/skills/sssf/templates/codex_agents/sssf_recon.toml"
+    ROOT / ".agents/skills/sssf/templates/codex_agents/sssf_recon.toml"
 )
 
 
@@ -74,7 +74,7 @@ def _install_role(tmp_path: Path) -> Path:
     role.parent.mkdir(parents=True, exist_ok=True)
     role.write_text(ROLE_TEMPLATE.read_text().replace(
         "{{sssf_skill_path_toml}}",
-        json.dumps(str(ROOT / ".claude/skills/sssf/SKILL.md")),
+        json.dumps(str(ROOT / ".agents/skills/sssf/SKILL.md")),
     ))
     return role
 
@@ -83,7 +83,7 @@ def test_m3_config_enables_only_planner_and_scout_and_validates_child_role(
     tmp_path: Path, monkeypatch,
 ) -> None:
     template = agents.load_config(
-        str(ROOT / ".claude/skills/sssf/templates/sssf.config.yaml")
+        str(ROOT / ".agents/skills/sssf/templates/sssf.config.yaml")
     )
     assert {agent.name for agent in template.agents if agent.subagents.enabled} == {
         "planner", "scout",

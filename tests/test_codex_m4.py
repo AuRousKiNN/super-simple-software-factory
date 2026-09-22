@@ -10,7 +10,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL = ROOT / ".claude/skills/sssf"
+SKILL = ROOT / ".agents/skills/sssf"
 INSTALLER = SKILL / "scripts/install.py"
 
 
