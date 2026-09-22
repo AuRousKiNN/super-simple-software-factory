@@ -14,7 +14,7 @@ TEMPLATE_ADWS = ROOT / ".agents/skills/sssf/templates/adws"
 sys.path.insert(0, str(TEMPLATE_ADWS))
 
 import adw_simple_sdlc  # noqa: E402
-from adw_modules import agents  # noqa: E402
+from adw_modules import agents, changes  # noqa: E402
 from adw_modules.agent_codex import (  # noqa: E402
     SDK_VERSION,
     CodexRuntime,
@@ -412,7 +412,8 @@ class _PhaseHandle:
     def log(self, **_payload):
         pass
 
-    def call(self, _call):
+    def call(self, call):
+        self.run.calls.append((self.params.name, call))
         if self.params.owner == "planner":
             return PlanOutput(
                 status="success", summary="planned", artifacts=["plan.md", "spec.md"],
@@ -420,8 +421,7 @@ class _PhaseHandle:
             )
         if self.params.owner == "builder":
             return BuildOutput(
-                status="success", summary="built", changed_files=["src.py"],
-                commit_message="实现功能",
+                status="success", summary="built", commit_message="实现功能",
             )
         if self.params.owner == "reviewer":
             return ReviewOutput(
@@ -442,6 +442,7 @@ class _Run:
         self.adw_id = "m3-chain"
         self.engineer = "tester"
         self.phases = []
+        self.calls = []
         self.accepted = None
 
     @contextmanager
@@ -471,7 +472,13 @@ def test_complete_sdlc_chain_reaches_documentation(monkeypatch) -> None:
         base=BaseRef(ref="main", commit="a" * 40, reason="pinned"),
         files=["src.py"], insertions=1, stat="src.py | 1 +", diff_path="diff.patch",
     )
-    monkeypatch.setattr(adw_simple_sdlc.changes, "capture", lambda *_args: changeset)
+    captured_bases = []
+
+    def capture(_run, params):
+        captured_bases.append(params.base)
+        return changeset
+
+    monkeypatch.setattr(adw_simple_sdlc.changes, "capture", capture)
     monkeypatch.setattr(
         adw_simple_sdlc.changes,
         "as_envelope",
@@ -480,7 +487,31 @@ def test_complete_sdlc_chain_reaches_documentation(monkeypatch) -> None:
 
     assert adw_simple_sdlc.main("build it") == 0
     assert [phase.name for phase in run.phases] == [
-        "request", "plan", "commit_plan", "build", "test_1", "review_1",
-        "commit_build", "changes", "document", "commit_docs",
+        "request", "plan", "commit_plan", "build", "test_1",
+        "changes_review_1", "review_1", "commit_build", "changes", "document",
+        "commit_docs",
     ]
+    review_call = next(call for name, call in run.calls if name == "review_1")
+    assert isinstance(review_call.previous, ChangesOutput)
+    assert captured_bases == ["b" * 40, "a" * 40]
     assert run.accepted[0] is True
+
+
+def test_change_capture_includes_untracked_new_files(tmp_path: Path, monkeypatch) -> None:
+    base = BaseRef(ref="a" * 40, commit="a" * 40, reason="pinned")
+    monkeypatch.setattr(changes, "resolve_base", lambda _ref: base)
+    monkeypatch.setattr(changes.git_helper, "diff_files", lambda _base: ["edited.py", "deleted.py"])
+    monkeypatch.setattr(changes.git_helper, "untracked_files", lambda: ["new.py"])
+    monkeypatch.setattr(changes.git_helper, "diff_counts", lambda _base: (2, 1))
+    monkeypatch.setattr(changes.git_helper, "diff_stat", lambda _base: "2 files changed")
+    monkeypatch.setattr(changes.git_helper, "diff_text", lambda _base: "diff --git a/edited.py")
+    monkeypatch.setattr(changes.git_helper, "short_sha", lambda value: value[:7])
+
+    run = SimpleNamespace(context_handoff_dir=tmp_path)
+    captured = changes.capture(run, changes.ChangeCapture(base=base.ref))
+    envelope = changes.as_envelope(captured)
+
+    assert captured.files == ["edited.py", "deleted.py"]
+    assert captured.untracked == ["new.py"]
+    assert envelope.changed_files == ["edited.py", "deleted.py", "new.py"]
+    assert "new.py" in Path(captured.diff_path).read_text()

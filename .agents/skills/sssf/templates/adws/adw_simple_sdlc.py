@@ -9,7 +9,7 @@ Usage:
 
 Phases: engineer(request) -> planner -> git(commit_plan)
         -> builder -> code(test) [-> builder(fix) -> code(test) ... bounded]
-        -> reviewer [-> builder(revise) -> reviewer ... bounded]
+        -> [code(changes) -> reviewer -> builder(revise)] bounded
         -> code(retest, only if a revision changed code)
         -> git(commit_build) -> code(changes) -> documenter -> git(commit_docs)
 
@@ -64,10 +64,26 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     run = session.ensure(cfg, adw_id)
     baseline = git_helper.rev("HEAD")     # pinned before this run commits anything
 
-    def commit(ph, envelope) -> None:
+    def commit(ph, envelope) -> str:
         """Commit what the preceding phase produced, in that agent's own words."""
         message = envelope.commit_message or f"sssf({run.adw_id}): {envelope.summary}"
-        ph.log(sha=git_helper.commit_all(message), message=message)
+        sha = git_helper.commit_all(message)
+        ph.log(sha=sha, message=message)
+        return sha
+
+    def capture_changes(ph, base: str, notes: str):
+        """Record Git's complete tracked-plus-untracked view for an agent handoff."""
+        changeset = changes.capture(run, ChangeCapture(base=base))
+        ph.log(base=f"{changeset.base.label} @ {changeset.base.commit[:7]}",
+               reason=changeset.base.reason,
+               files=len(changeset.files) + len(changeset.untracked),
+               lines=f"+{changeset.insertions} -{changeset.deletions}",
+               diff=changeset.diff_path)
+        if changeset.empty:
+            raise RuntimeError(
+                f"nothing changed since {changeset.base.label} "
+                f"({changeset.base.reason})")
+        return changes.as_envelope(changeset, notes)
 
     def record(ph, result) -> None:
         """Log a deterministic block's verdict — the same shape every ADW uses."""
@@ -86,12 +102,11 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
     with run.phase(PhaseParams(name="commit_plan", kind="code", owner="git",
                                description="Put the spec on record before any code exists to blur it")) as ph:
-        commit(ph, plan)
+        build_base = commit(ph, plan)
 
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
                                description="Implement the plan exactly")) as ph:
-        build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
-                                  gates=[gates.diff_matches_claims]))
+        build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan))
 
     test = None
     for i in range(1, MAX_FIX_LOOPS + 1):
@@ -108,15 +123,18 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                    description="Repair what the suite reported, from its "
                                                "verbatim output")) as ph:
             build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
-                                      previous=quality.as_envelope(test, "tests"),
-                                      gates=[gates.diff_matches_claims]))
+                                      previous=quality.as_envelope(test, "tests")))
 
     review = None
     revised = False
     for i in range(1, MAX_REVISION_LOOPS + 1):
+        with run.phase(PhaseParams(name=f"changes_review_{i}", kind="code", owner="git",
+                                   description="Capture code since the plan commit so review uses Git facts")) as ph:
+            review_input = capture_changes(ph, build_base, "Review this code against the plan.")
+
         with run.phase(PhaseParams(name=f"review_{i}", kind="agent", owner="reviewer",
                                    description="Confirm the build matches the plan")) as ph:
-            review = ph.call(AgentCall(output_type=ReviewOutput, prompt=prompt, previous=build,
+            review = ph.call(AgentCall(output_type=ReviewOutput, prompt=prompt, previous=review_input,
                                        gates=[gates.artifacts_exist, gates.verdict_consistent]))
 
         if review.approved or i == MAX_REVISION_LOOPS:
@@ -124,8 +142,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
         with run.phase(PhaseParams(name=f"revise_{i}", kind="agent", owner="builder", retries=1,
                                    description="Close the reviewer's blocking findings")) as ph:
-            build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=review,
-                                      gates=[gates.diff_matches_claims]))
+            build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=review))
             revised = True
 
     # A revision edited code after the suite last ran, so the green light is
@@ -149,21 +166,12 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
         with run.phase(PhaseParams(name="changes", kind="code", owner="git",
                                    description="Diff the whole run against its pinned baseline, for the documenter")) as ph:
-            changeset = changes.capture(run, ChangeCapture(base=baseline))
-            ph.log(base=f"{changeset.base.label} @ {changeset.base.commit[:7]}",
-                   reason=changeset.base.reason,
-                   files=len(changeset.files) + len(changeset.untracked),
-                   lines=f"+{changeset.insertions} -{changeset.deletions}",
-                   diff=changeset.diff_path)
-            if changeset.empty:
-                raise RuntimeError(
-                    f"nothing changed since {changeset.base.label} "
-                    f"({changeset.base.reason}) — there is nothing to document.")
+            document_input = capture_changes(ph, baseline, DOCUMENT_NOTES)
 
         with run.phase(PhaseParams(name="document", kind="agent", owner="documenter", retries=1,
                                    description="Write up the completed change")) as ph:
             document = ph.call(AgentCall(output_type=DocumentOutput, prompt=prompt,
-                                         previous=changes.as_envelope(changeset, DOCUMENT_NOTES),
+                                         previous=document_input,
                                          gates=[gates.artifacts_exist, gates.files_non_empty]))
 
         with run.phase(PhaseParams(name="commit_docs", kind="code", owner="git",

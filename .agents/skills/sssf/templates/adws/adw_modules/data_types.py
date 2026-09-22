@@ -93,7 +93,6 @@ class PlanOutput(EnvelopeBase):
 
 
 class BuildOutput(EnvelopeBase):
-    changed_files: list[str] = Field(default_factory=list)
     commit_message: str = ""        # consumed by the git commit phase
 
 

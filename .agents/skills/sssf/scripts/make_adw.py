@@ -9,7 +9,9 @@ Usage:
 
 Each named agent becomes one agent phase, chained by envelope. Starter agents
 map to their concrete output types; unknown agents get GenericOutput (define a
-concrete type in adw_modules/data_types.py and swap it in).
+concrete type in adw_modules/data_types.py and swap it in). A builder is
+followed by a deterministic Git capture, so downstream agents receive facts
+from ChangesOutput rather than builder-authored paths.
 """
 
 import argparse
@@ -35,8 +37,8 @@ Phases: engineer(request) -> {chain}
 import argparse
 import sys
 
-from adw_modules import agents, gates, session, utils
-from adw_modules.data_types import AgentCall, PhaseParams, {imports}
+from adw_modules import agents, changes, gates, git_helper, session, utils
+from adw_modules.data_types import AgentCall, ChangeCapture, PhaseParams, {imports}
 
 REQUIRED_AGENTS = {agents_list}
 
@@ -45,6 +47,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     cfg = agents.load_config(config)
     agents.validate(cfg, REQUIRED_AGENTS)
     run = session.ensure(cfg, adw_id)
+{build_base}
 
     with run.phase(PhaseParams(name="request", kind="engineer", owner=run.engineer,
                                description="Capture the incoming ask")) as ph:
@@ -72,6 +75,17 @@ PHASE = '''    # TODO: replace this description — say what THIS phase does and
                                      gates=[gates.artifacts_exist]))
 '''
 
+CHANGES_PHASE = '''    with run.phase(PhaseParams(name="{name}", kind="code", owner="git",
+                               description="Capture the cumulative Git diff for downstream agents")) as ph:
+        changeset = changes.capture(run, ChangeCapture(base=build_base))
+        ph.log(files=len(changeset.files) + len(changeset.untracked),
+               lines=f"+{{changeset.insertions}} -{{changeset.deletions}}",
+               diff=changeset.diff_path)
+        if changeset.empty:
+            raise RuntimeError("builder produced no changes")
+        previous = changes.as_envelope(changeset, "Git-captured builder changes")
+'''
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -92,13 +106,23 @@ def main() -> int:
         seen[agent] = seen.get(agent, 0) + 1
         phase_name = agent if seen[agent] == 1 else f"{agent}_{seen[agent]}"
         phases.append(PHASE.format(name=phase_name, agent=agent, output_type=output_type))
+        if agent == "builder":
+            phases.append(CHANGES_PHASE.format(name=f"changes_after_{phase_name}"))
+
+    chain = []
+    for agent in agent_names:
+        chain.append(agent)
+        if agent == "builder":
+            chain.append("code(changes)")
 
     body = HEADER.format(
         title=args.name.replace("_", " ").title(),
         name=args.name,
-        chain=" -> ".join(agent_names),
+        chain=" -> ".join(chain),
         imports=", ".join(sorted(set(types))),
         agents_list=repr(sorted(set(agent_names))),
+        build_base=('    build_base = git_helper.rev("HEAD")'
+                    if "builder" in agent_names else ""),
         phases="\n".join(phases),
     )
 

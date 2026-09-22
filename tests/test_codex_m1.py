@@ -131,6 +131,11 @@ def test_strict_schema_closes_nested_objects_and_rejects_unverified_keywords() -
         strict_output_schema(PatternOutput)
 
 
+def test_builder_does_not_claim_changed_files() -> None:
+    with pytest.raises(ValidationError, match="changed_files"):
+        BuildOutput(status="success", changed_files=["src.py"])
+
+
 @dataclass
 class _Notification:
     method: str

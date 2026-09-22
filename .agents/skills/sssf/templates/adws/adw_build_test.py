@@ -22,7 +22,7 @@ has had its chances.
 import argparse
 import sys
 
-from adw_modules import agents, gates, quality, session, utils
+from adw_modules import agents, quality, session, utils
 from adw_modules.data_types import AgentCall, BuildOutput, PhaseParams
 
 REQUIRED_AGENTS = ["builder"]
@@ -45,8 +45,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
                                description="Implement the request")) as ph:
-        ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
-                          gates=[gates.diff_matches_claims]))
+        ph.call(AgentCall(output_type=BuildOutput, prompt=prompt))
 
     test = None
     for i in range(1, MAX_FIX_LOOPS + 1):
@@ -63,8 +62,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                    description="Repair what the suite reported, from its "
                                                "verbatim output")) as ph:
             ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
-                              previous=quality.as_envelope(test, "tests"),
-                              gates=[gates.diff_matches_claims]))
+                              previous=quality.as_envelope(test, "tests")))
 
     return run.finish(accepted=test is not None and test.passed,
                       reason=f"the suite still failed after {MAX_FIX_LOOPS} fix attempt(s)")

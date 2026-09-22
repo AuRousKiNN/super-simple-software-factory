@@ -12,6 +12,10 @@ usage update, and failure is persisted to SQLite.
 The distribution has one agent runtime: the official Python Codex SDK,
 `openai-codex==0.155.1`.
 
+## 项目交互导览
+
+用浏览器打开 [中文交互导览](docs/project-guide/index.html)，从项目全貌逐步了解交付流程、角色权限、验收机制与源码结构。导览可离线使用，内含失败情境演示与源码链接，不会执行工作流。
+
 ## Install
 
 Prerequisites:

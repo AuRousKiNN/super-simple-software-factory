@@ -36,13 +36,14 @@ Delete the block, drop any now-unused agent from `REQUIRED_AGENTS`, and re-threa
 Gates are callables over the finished envelope — `gate(envelope, run) -> GateReport`, recording one `check(item, ok, note)` per thing they looked at, with violations derived from the failed ones. Compose them per call:
 
 ```python
-        build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
-                                  gates=[gates.artifacts_exist, gates.diff_matches_claims]))
+        document = ph.call(AgentCall(output_type=DocumentOutput, prompt=prompt,
+                                     previous=changes,
+                                     gates=[gates.artifacts_exist, gates.files_non_empty]))
 ```
 
 On violations the runtime does **not** restart the agent. It sends the violation list as a new turn on the **same Codex thread**, bounded by that phase's `retries`. Every gate result is traced to the `gate_results` table. Exhausting the retries raises `GateFailure` and fails the phase.
 
-Gate claims, not guesses: declared artifacts exist and are non-empty, declared JSON parses, declared changes appear in the diff, declared test commands pass. Never hardcode counts — express quantity as a property of the declared list ("at least one artifact", "ALL declared paths valid"). Plan quality and code taste are not gateable; that is a reviewer agent or a human. New reusable gates go in `adw_modules/gates.py` (`update_modules.md`).
+Gate claims, not guesses: declared artifacts exist and are non-empty, declared JSON parses, declared test commands pass. Changed paths are not an agent claim at all: use `changes.capture(...)` in a code phase, which combines Git's tracked diff with untracked files. Never hardcode counts — express quantity as a property of the declared list ("at least one artifact", "ALL declared paths valid"). Plan quality and code taste are not gateable; that is a reviewer agent or a human. New reusable gates go in `adw_modules/gates.py` (`update_modules.md`).
 
 ## Add a bounded fix loop
 
@@ -64,8 +65,7 @@ MAX_FIX_LOOPS = 3
         with run.phase(PhaseParams(name=f"fix_{i}", kind="agent", owner="builder", retries=1,
                                    description="Repair what the suite reported, from its verbatim output")) as ph:
             previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
-                                         previous=quality.as_envelope(test, "tests"),
-                                         gates=[gates.diff_matches_claims]))
+                                         previous=quality.as_envelope(test, "tests")))
 
     return run.finish(accepted=test is not None and test.passed,
                       reason=f"the suite still failed after {MAX_FIX_LOOPS} fix attempt(s)")

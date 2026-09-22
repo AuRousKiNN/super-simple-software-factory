@@ -13,7 +13,7 @@ Phases: engineer(request) -> builder
 import argparse
 import sys
 
-from adw_modules import agents, gates, session, utils
+from adw_modules import agents, session, utils
 from adw_modules.data_types import AgentCall, BuildOutput, PhaseParams
 
 REQUIRED_AGENTS = ["builder"]
@@ -30,8 +30,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder", retries=1,
                                description="Implement the request")) as ph:
-        ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
-                          gates=[gates.diff_matches_claims]))
+        ph.call(AgentCall(output_type=BuildOutput, prompt=prompt))
 
     return run.finish()
 

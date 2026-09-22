@@ -58,16 +58,6 @@ def json_parses(envelope: EnvelopeBase, run) -> GateReport:
     return report
 
 
-def diff_matches_claims(envelope: EnvelopeBase, run) -> GateReport:
-    """Every file claimed changed must exist on disk."""
-    report = GateReport()
-    for f in getattr(envelope, "changed_files", []):
-        p = Path(f)
-        report.check(f, p.exists(),
-                     f"exists, {_size(p)}" if p.exists() else "claimed changed file does not exist")
-    return report
-
-
 def verdict_consistent(envelope: EnvelopeBase, run) -> GateReport:
     """A review's verdict must agree with the findings it just wrote down.
 

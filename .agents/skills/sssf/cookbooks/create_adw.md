@@ -12,7 +12,7 @@ Answer four questions, in order:
 |---|---|---|---|
 | `scout` | you need to FIND something first — read-only recon | `ScoutOutput` | `artifacts_exist` |
 | `planner` | the work needs a plan before code changes | `PlanOutput` | `artifacts_exist`, `files_non_empty` |
-| `builder` | code must change | `BuildOutput` | `diff_matches_claims` |
+| `builder` | code must change | `BuildOutput` | none; capture the result with a code phase |
 | `reviewer` | the change must be confirmed to BE what was asked for | `ReviewOutput` | `artifacts_exist`, `verdict_consistent` |
 | *(no tester)* | verifying that it RUNS is a `kind="code"` phase over `quality.py`, not an agent | `QualityResult` → `as_envelope` | the exit code is the check |
 | `documenter` | finished work needs a write-up (runs after a build, off the diff) | `DocumentOutput` | `artifacts_exist`, `files_non_empty` |
@@ -28,7 +28,7 @@ Answer four questions, in order:
 
 3. **Does anything loop?** Test-fix cycles are bounded fix loops (see `update_adw.md`), not phase retries.
 
-4. **What does each call need to prove?** Pick gates per call from `gates.py`: `artifacts_exist`, `files_non_empty`, `json_parses`, `diff_matches_claims`, `tests_pass("cmd")` — or an inline one-off.
+4. **What does each call need to prove?** Pick gates per call from `gates.py`: `artifacts_exist`, `files_non_empty`, `json_parses`, `tests_pass("cmd")` — or an inline one-off. A builder does not declare its changed paths: capture them deterministically with `changes.py` when a downstream phase needs the range.
 
 ## Step 2 — Ownership rules (the swim lanes depend on these)
 
@@ -83,8 +83,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder", retries=1,
                                description="Implement the plan exactly")) as ph:
-        build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
-                                  gates=[gates.diff_matches_claims]))
+        build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan))
 
     with run.phase(PhaseParams(name="commit", kind="code", owner="git",
                                description="Commit the working tree")) as ph:

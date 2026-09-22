@@ -202,6 +202,8 @@ def test_generated_adw_uses_pinned_sdk_rich_and_run_finish(tmp_path: Path) -> No
     assert '"openai-codex==0.155.1"' in text
     assert '"rich"' in text
     assert "return run.finish()" in text
+    assert "builder -> code(changes)" in text
+    assert "changes.capture(run, ChangeCapture(base=build_base))" in text
     assert "run.succeeded" not in text
     compile(text, str(script), "exec")
     launched = subprocess.run(

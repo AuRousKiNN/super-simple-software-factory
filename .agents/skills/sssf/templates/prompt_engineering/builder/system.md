@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Implement the plan (or request) exactly; report every file you changed.
+Implement the plan (or request) exactly; Git records the files you changed.
 
 ## Instructions
 

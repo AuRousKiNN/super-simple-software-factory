@@ -53,11 +53,6 @@ def commit_all(message: str) -> str:
     return _git("rev-parse", "--short", "HEAD")
 
 
-def changed_files() -> list[str]:
-    out = _git("status", "--porcelain")
-    return [line[3:] for line in out.splitlines() if line]
-
-
 # ── diff plumbing (composed into a ChangeSet by documentation.py) ────────────
 
 def ref_exists(ref: str) -> bool:

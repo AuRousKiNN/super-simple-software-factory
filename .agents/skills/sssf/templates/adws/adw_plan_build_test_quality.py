@@ -42,8 +42,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder",
                                description="Implement the plan exactly")) as ph:
-        previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan,
-                                     gates=[gates.diff_matches_claims]))
+        previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, previous=plan))
 
     def record(ph, result) -> None:
         passed = sum(1 for check in result.checks if check.passed)
@@ -74,8 +73,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         with run.phase(PhaseParams(name=f"fix_{i}", kind="agent", owner="builder", retries=1,
                                    description=f"Resolve the reported {what} failures")) as ph:
             previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
-                                         previous=quality.as_envelope(broken, what),
-                                         gates=[gates.diff_matches_claims]))
+                                         previous=quality.as_envelope(broken, what)))
 
     verified = (quality_result is not None and quality_result.passed
                 and test_result is not None and test_result.passed)

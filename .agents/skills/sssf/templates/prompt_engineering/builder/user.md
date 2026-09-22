@@ -26,7 +26,6 @@ Respond with ONLY valid JSON matching `BuildOutput` — no prose before or after
 {
   "status": "success",
   "summary": "<one sentence describing what you built>",
-  "changed_files": ["src/server.ts"],
   "artifacts": [],
   "commit_message": "<imperative one-line git subject for the code you changed — this is what the commit of your work will say>",
   "notes_for_next_agent": "<how to verify this work>"
