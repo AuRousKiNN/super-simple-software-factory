@@ -33,7 +33,7 @@ def main(output: Path) -> int:
     (workspace / "README.md").write_text("# Synthetic ticket smoke\nNo greeting exists yet.\n")
     (workspace / "specs").mkdir()
     (workspace / "specs/greeting.md").write_text(
-        "# Greeting delivery\n\nREQ-01: Add greeting.txt at repository root.\n"
+        "---\nrevision: 1\n---\n# Greeting delivery\n\nREQ-01: Add greeting.txt at repository root.\n"
         "CONTRACT-01: Its exact UTF-8 bytes are hello from ticket followed by one newline.\n"
         "AC-01: Reading greeting.txt yields the exact CONTRACT-01 bytes.\n"
         "Scope: only this one new file; no other implementation changes.\n"
@@ -48,8 +48,8 @@ def main(output: Path) -> int:
     execute("git-commit", ["git", "commit", "-qm", "初始化合成拆解验收仓库"])
     execute("decompose", [sys.executable, "adws/adw_decompose.py", "--spec", "specs/greeting.md",
                           "--adw-id", "ticket-decompose"])
-    set_path = "specs/greeting.tickets/r1/ticket-set.md"
-    index = json.loads((workspace / "specs/greeting.tickets/r1/index.json").read_text())
+    set_path = "specs/greeting.tickets/ticket-set.md"
+    index = json.loads((workspace / "specs/greeting.tickets/index.json").read_text())
     if len(index["tickets"]) != 1:
         raise AssertionError("expected one independent ticket")
     selected = index["tickets"][0]

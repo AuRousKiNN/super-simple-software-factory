@@ -39,6 +39,10 @@ Use the other cookbooks for an operation. Read deep references only when their
 subject is needed.
 
 Optional ticket flow: `adw_plan_decompose` creates a complete spec and validated
-planning set; `adw_decompose --spec` starts with an existing archive. The build
+planning set; `adw_decompose --spec` starts with the current spec. The build
 entry accepts a direct request, `--spec`, or `--ticket` with `--ticket-set`.
 See [ticket contracts](../references/tickets.md) for evidence and session binding.
+
+Review ownership, bounded repair/verification, planning handoffs and the
+`adw_recheck.py` evidence-only entry are described in the
+[Reviewer routing contract](../references/reviewer-routing.md).

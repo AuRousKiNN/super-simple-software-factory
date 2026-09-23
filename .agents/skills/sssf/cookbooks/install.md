@@ -69,12 +69,24 @@ Before invoking a new workflow:
    planning writes and enabled read-only recon role. Keep builder children disabled.
 2. Merge planner prompts: full root spec with stable REQ/CONTRACT/AC IDs and the
    authoritative `spec_path` in PlanOutput. Move ticket ownership to decomposer.
+   Merge the in-place revision rules for both roles: stable file paths and an
+   integer revision in each document, incremented for every revision.
 3. Merge builder/reviewer prompts: render `{{work_item}}`, preserve target on every
    repair, and treat root/set/index as read-only. Merge new decomposer prompts.
 4. Merge customized ADWs: use concrete output types, construct SpecWorkItem after
    planning, preserve it for fixes/review, and select an explicit ticket after
-   decomposition. Add required roster entries and `run.finish()` acceptance.
+   decomposition. Use the stable `<spec>.tickets/` directory and refresh indexes
+   through `tickets.publish_decomposition`. Add required roster entries and
+   `run.finish()` acceptance.
 5. Validate the merged config and contracts using an isolated spec → decomposition
-   → single-ticket smoke. A changed prompt fingerprint requires a new session.
+   → single-ticket smoke. Start fresh sessions for the updated decomposition input
+   contract and changed prompt fingerprints. Existing session records remain audit
+   records; new runs use the current source and planning paths.
 
 Detailed schemas and prerequisite evidence format: [ticket contract](../references/tickets.md).
+
+Reviewer routing updates require an explicit merge of the customized reviewer
+prompts/report examples, review ADWs and `quality.py` check registry with the
+managed ReviewOutput/gates/routing modules. String blockers are replaced by
+structured ReviewBlocker entries. Preserve local commands when moving them into
+`quality.check_specs()`. See [routing migration](../references/reviewer-routing.md#existing-installations).

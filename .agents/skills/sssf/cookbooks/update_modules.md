@@ -14,6 +14,7 @@ Low-level behavior belongs in `adws/adw_modules/`. Keep ADW entry points thin.
 | `runner.py` | phase lifecycle, atomic thread mapping, totals, finish verdict |
 | `session.py` | session creation, recovery, signals, runtime shutdown |
 | `tracer.py` | schema-v2 SQLite persistence |
+| `review_routing.py` | structured ownership, bounded route decisions, immutable handoffs and recheck validation |
 | `quality.py` | repository-specific deterministic commands |
 
 Rules for changes:

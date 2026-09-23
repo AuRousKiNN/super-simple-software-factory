@@ -252,6 +252,19 @@ The factory runs on the current checkout and intentionally does not create a
 branch or merge automatically. Codex sandboxing and SSSF write verification are
 defense-in-depth, not a substitute for repository isolation.
 
+## Reviewer routing and recheck
+
+Review blockers now carry structured ownership and closure conditions. The two
+review workflows distinguish builder repair from execution of configured checks;
+planning, environment, required manual and external blockers save a host-owned
+handoff and end unaccepted. Generated workflows stop before downstream delivery
+when review is unapproved. Check placeholders do not count as passing validation.
+
+Use `uv run adws/adw_recheck.py recheck.json` for an explicit new evidence review
+without rebuilding. It validates the original target, current baseline and proof,
+then runs required configured checks. See the [routing and recheck contract](.agents/skills/sssf/references/reviewer-routing.md)
+for kinds, budgets, request JSON, planning handoffs and existing-install updates.
+
 ## Development verification
 
 The deterministic suite uses the locked SDK dependency:
@@ -279,17 +292,19 @@ MIT. See [LICENSE](LICENSE).
 
 ## Optional ticket decomposition
 
-Planner archives a complete root spec and returns `PlanOutput.spec_path`.
-Decomposer turns that spec into a versioned `ticket-set.md` and one Markdown
-file per ticket. Python reads the planning metadata and atomically derives `index.json`. It checks
+Planner maintains a complete root spec at a stable `PlanOutput.spec_path`.
+Decomposer maintains `ticket-set.md` and one Markdown file per ticket under the
+spec's `.tickets/` directory. Each planning document starts with `revision: 1`;
+revisions update that file in place and increment its number, including wording
+changes. Python reads the planning metadata and atomically derives `index.json`. It checks
 source binding and dependency relationships, without validating artifact formatting.
 
 ```bash
 uv run adws/adw_plan_decompose.py "add query and export capabilities"
 uv run adws/adw_decompose.py --spec specs/example.md
 uv run adws/adw_build.py --spec specs/example.md
-uv run adws/adw_build.py --ticket specs/example.tickets/r1/tickets/TICKET-QUERY.md \
-  --ticket-set specs/example.tickets/r1/ticket-set.md
+uv run adws/adw_build.py --ticket specs/example.tickets/tickets/TICKET-QUERY.md \
+  --ticket-set specs/example.tickets/ticket-set.md
 ```
 
 Use a new session for each ticket. Repairs retain the same work item and thread;

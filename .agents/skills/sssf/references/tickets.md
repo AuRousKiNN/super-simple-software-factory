@@ -6,11 +6,17 @@ IDs provide stable references. Decomposer owns ticket boundaries and dependencie
 
 ## Artifacts and validation
 
-A source `specs/example.md` has snapshots at `specs/example.tickets/rN/`:
+A source `specs/example.md` has its current planning files at `specs/example.tickets/`:
 `ticket-set.md`, `tickets/TICKET-*.md`, and a host-derived `index.json`.
 The set frontmatter contains schema_version=1, revision, source_spec and tickets.
 Each ticket contains schema_version=1, id, revision, kind, profile, blocked_by and
 requirements. kind is behavior/refactor/integration; profile is standard/critical.
+
+Planner and decomposer revise their documents in place at stable paths. Each spec,
+set and ticket starts with revision=1 in its frontmatter; every revision increments
+that document's number, including wording and ordering changes. Unchanged documents
+retain their number. Planning roles own this count; the index mirrors document
+metadata and the runtime binds exact content hashes.
 
 Markdown layout and metadata examples guide the agent; they are not artifact
 validation rules. The runtime does not check headings, body content, AC tables,
@@ -24,12 +30,15 @@ files or unreadable required metadata prevent the code phase from consuming them
 Paths, source hashes, membership identities and acyclic blocker relationships are
 runtime constraints. Coverage and evidence quality remain agent/reviewer judgment.
 
-`prepare_decomposition` saves the source digest and reserves a revision before
-dispatch. A new session chooses the next free revision; published snapshots cannot
-be reused for new decomposition. Valid fail envelopes persist and stop immediately
-with needs_spec_revision, needs_decision or artifact_error. The code index phase
-checks the bound source and output directory, then `write_index` atomically derives
-the cache. `load_index` rejects changed inputs until the index is regenerated.
+`prepare_decomposition` saves the source digest and stable output directory before
+dispatch. A fresh session can revise the existing files even when an index already
+exists. Valid fail envelopes persist and stop immediately with needs_spec_revision,
+needs_decision or artifact_error. The code index phase uses `publish_decomposition`
+to check the bound source and output directory, refresh the index, and save its
+path and digest in the host-owned session file `decomposition-published.json`.
+That receipt closes the session's planning binding; further revisions use a fresh
+session with the same output directory. `load_index` rejects changed inputs until
+the index is regenerated.
 
 ## Implementation inputs
 

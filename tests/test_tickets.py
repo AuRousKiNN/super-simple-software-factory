@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -43,19 +44,19 @@ def repo(tmp_path):
 def planning(root, edges=None):
     edges = edges or {"TICKET-Z": [], "TICKET-A": [], "TICKET-M": ["TICKET-Z"]}
     (root / "specs").mkdir(exist_ok=True)
-    (root / "specs/root.md").write_text("# Root\nREQ-01: query behavior\nCONTRACT-01: stable API\nAC-01: integrated outcome\n")
-    output = root / "specs/root.tickets/r1"
+    (root / "specs/root.md").write_text("---\nrevision: 1\n---\n# Root\nREQ-01: query behavior\nCONTRACT-01: stable API\nAC-01: integrated outcome\n")
+    output = root / "specs/root.tickets"
     (output / "tickets").mkdir(parents=True, exist_ok=True)
     members = []
     for name, blockers in edges.items():
-        member = f"specs/root.tickets/r1/tickets/{name}.md"
+        member = f"specs/root.tickets/tickets/{name}.md"
         members.append(member)
         write_ticket(root / member, name, blockers)
     meta = {"schema_version": 1, "revision": 1, "source_spec": "specs/root.md", "tickets": members}
     (output / "ticket-set.md").write_text("---\n" + yaml.safe_dump(meta) + "---\n# Tickets\n"
         "## Integration obligations\nAC-01 integration.\n## Coordination\nNone.\n"
         "## Rationale and revision impact\nIndependent behavior.\n")
-    return "specs/root.tickets/r1/ticket-set.md", members
+    return "specs/root.tickets/ticket-set.md", members
 
 
 def write_ticket(path, name, blockers):
@@ -200,7 +201,7 @@ def test_dynamic_permissions_restore_all_exit_paths(repo, error):
 def test_decomposer_has_no_artifact_format_gate_and_preserves_failure(repo):
     planning(repo, {"TICKET-Z": []})
     runtime = _QueuedRuntime([DecomposeOutput(status="success", outcome="ready",
-        ticket_set_path="specs/root.tickets/r2/arbitrary-name.md").model_dump_json()])
+        ticket_set_path="specs/root.tickets/arbitrary-name.md").model_dump_json()])
     run = run_for(repo, role="decomposer", runtime=runtime)
     target = tickets.prepare_decomposition(run, "specs/root.md")
     # Missing artifacts and arbitrary names do not cause agent format correction.
@@ -218,16 +219,18 @@ def test_decomposer_has_no_artifact_format_gate_and_preserves_failure(repo):
     assert len(run.runtime.requests) == 1
 
 
-def test_decomposer_cannot_write_old_revision_or_host_index(repo):
+def test_decomposer_can_revise_current_files_but_protects_other_inputs(repo):
     planning(repo)
     run = run_for(repo, "decomposer")
     target = tickets.prepare_decomposition(run, "specs/root.md")
-    assert target.revision == 2
+    assert target.output_dir == "specs/root.tickets"
     run.active_write_scope = target.output_dir + "/"
     run.active_readonly_paths = [target.spec.path]
     agent = run.cfg.agents[0]
     assert permissions.permitted(target.output_dir + "/tickets/TICKET-A.md", agent, run.cfg, run)
-    assert not permissions.permitted("specs/root.tickets/r1/tickets/TICKET-Z.md", agent, run.cfg, run)
+    assert permissions.permitted("specs/root.tickets/tickets/TICKET-Z.md", agent, run.cfg, run)
+    assert not permissions.permitted("specs/other.tickets/tickets/TICKET-Z.md", agent, run.cfg, run)
+    assert not permissions.permitted("sessions/adw-test/decomposition-published.json", agent, run.cfg, run)
     assert not permissions.permitted(target.output_dir + "/index.json", agent, run.cfg, run)
     assert not permissions.permitted("specs/root.md", agent, run.cfg, run)
     (repo / "specs/root.md").write_text("changed")
@@ -303,21 +306,108 @@ def test_install_upgrade_preserves_customizations_and_generated_chain(tmp_path):
     assert "tickets.select_ticket" in body and "selection" in body
     assert "work_item=work_item" in body
     assert "return run.finish(accepted=accepted" in body
-    assert "accepted = accepted and previous.approved" in body
+    assert 'if decision.action != "approve":' in body
+    assert "gates.verdict_consistent" in body
 
 
-def test_published_revision_requires_new_session(repo):
-    (repo / "specs").mkdir()
-    (repo / "specs/root.md").write_text("REQ-01 query AC-01 outcome")
-    run = run_for(repo, "decomposer")
-    target = tickets.prepare_decomposition(run, "specs/root.md")
-    planning(repo)
-    tickets.write_index(repo, target.output_dir + "/ticket-set.md")
+def test_decomposition_revises_in_place_and_closes_each_published_session(repo):
+    set_path, members = planning(repo, {"TICKET-Z": []})
+    ticket_path = repo / members[0]
+    original_set = (repo / set_path).read_bytes()
+    output = DecomposeOutput(status="success", outcome="ready", ticket_set_path=set_path)
+
+    class RevisingRuntime(_QueuedRuntime):
+        def run_turn(self, request, hooks):
+            if self.requests:
+                ticket_path.write_text(ticket_path.read_text().replace("revision: 1", "revision: 2")
+                                       + "\nClarified wording.\n")
+            return super().run_turn(request, hooks)
+
+    runtime = RevisingRuntime([output.model_dump_json()] * 2)
+    run = run_for(repo, "decomposer", runtime)
+
+    @contextmanager
+    def workflow_phase(params):
+        yield SimpleNamespace(log=lambda **_kwargs: None,
+                              call=lambda call: agents.execute(run, phase(run, params.owner), call))
+
+    run.phase = workflow_phase
+    assert tickets.decompose(run, "specs/root.md") == output
+    first_index = tickets.artifact(repo, "specs/root.tickets/index.json", ".json")
+    published = json.loads((run.session_dir / "decomposition-published.json").read_text())
+    assert published == first_index.model_dump()
     with pytest.raises(tickets.TicketError, match="already published"):
         tickets.prepare_decomposition(run, "specs/root.md")
-    run.session_dir = repo / "sessions/next"
+    # Completion belongs to this session, even if the shared index is removed.
+    (repo / first_index.path).unlink()
+    with pytest.raises(tickets.TicketError, match="already published"):
+        tickets.prepare_decomposition(run, "specs/root.md")
+    tickets.write_index(repo, set_path)
+    saved_paths = {p.relative_to(repo) for p in (repo / "specs").rglob("*")}
+
+    run.adw_id = "revise"
+    run.session_dir = repo / "sessions/revise"
+    run.context_handoff_dir = run.session_dir / "context_handoff"
+    run.context_handoff_dir.mkdir(parents=True)
+    run.agent_map = {"schema_version": 2, "agents": {}}
+    target = tickets.prepare_decomposition(run, "specs/root.md")
+    assert target.output_dir == "specs/root.tickets"
+    assert tickets.prepare_decomposition(run, "specs/root.md") == target
+    assert set(target.model_dump()) == {"spec", "output_dir"}
+    assert tickets.decompose(run, "specs/root.md") == output
+    data = tickets.load_index(repo, set_path)
+    assert data["tickets"][0]["revision"] == 2
+    assert (repo / set_path).read_bytes() == original_set
+    assert tickets.artifact(repo, first_index.path, ".json") != first_index
+    assert {p.relative_to(repo) for p in (repo / "specs").rglob("*")} == saved_paths
+    with pytest.raises(tickets.TicketError, match="already published"):
+        tickets.prepare_decomposition(run, "specs/root.md")
+
+
+@pytest.mark.parametrize("kind", ["spec", "ticket"])
+def test_in_place_revision_invalidates_old_binding_and_allows_fresh_session(repo, kind):
+    set_path, members = planning(repo, {"TICKET-Z": []})
+    tickets.write_index(repo, set_path)
+    run = run_for(repo)
+
+    def work_item():
+        if kind == "spec":
+            return tickets.spec_work_item(repo, "specs/root.md")
+        return tickets.ticket_work_item(run, set_path, members[0])
+
+    original = work_item()
+    tickets.bind_work_item(run, AgentCall(output_type=BuildOutput, prompt="build", work_item=original))
+    document = repo / ("specs/root.md" if kind == "spec" else members[0])
+    document.write_text(document.read_text().replace("revision: 1", "revision: 2") + "\nClarification.\n")
+    tickets.write_index(repo, set_path)
+    with pytest.raises(tickets.TicketError, match="artifact changed"):
+        tickets.bind_work_item(run, AgentCall(output_type=BuildOutput, prompt="repair"))
+    revised = work_item()
+    with pytest.raises(tickets.TicketError, match="session work_item changed"):
+        tickets.bind_work_item(run, AgentCall(output_type=BuildOutput, prompt="build", work_item=revised))
+    run.session_dir = repo / "sessions/revised-build"
     run.session_dir.mkdir()
-    assert tickets.prepare_decomposition(run, "specs/root.md").revision == 2
+    assert tickets.bind_work_item(run, AgentCall(output_type=BuildOutput, prompt="build",
+                                               work_item=revised))[0] == revised
+
+
+@pytest.mark.parametrize("failure", ["source", "outside", "failed"])
+def test_invalid_decomposition_publication_preserves_previous_index(repo, failure):
+    set_path, _ = planning(repo)
+    original = tickets.write_index(repo, set_path)
+    run = run_for(repo, "decomposer")
+    target = tickets.prepare_decomposition(run, "specs/root.md")
+    output = DecomposeOutput(status="success", outcome="ready", ticket_set_path=set_path)
+    if failure == "source":
+        (repo / "specs/root.md").write_text("changed source")
+    elif failure == "outside":
+        output.ticket_set_path = "specs/other.tickets/ticket-set.md"
+    else:
+        output = DecomposeOutput(status="fail", outcome="needs_decision")
+    with pytest.raises(tickets.TicketError):
+        tickets.publish_decomposition(run, target, output)
+    assert tickets.artifact(repo, original.path, ".json") == original
+    assert not (run.session_dir / "decomposition-published.json").exists()
 
 
 def test_ac_inline_code_is_valid_markdown(repo):
@@ -353,27 +443,34 @@ def test_acceptance_publication_requires_accepted_run_and_committed_implementati
     assert json.loads((repo / published.path).read_text())["accepted"] is True
 
 
-def test_ticket_inputs_override_broad_writes_and_prior_revision_is_restored(repo):
+def test_current_planning_writes_preserve_host_receipts_and_implementation_inputs(repo):
     set_path, members = planning(repo)
     tickets.write_index(repo, set_path)
     run = run_for(repo, "decomposer")
     target = tickets.prepare_decomposition(run, "specs/root.md")
     run.active_write_scope = target.output_dir + "/"
     run.active_readonly_paths = [target.spec.path]
+    # Host receipts are protected even under an ignored session directory.
+    receipt = repo / "sessions/previous/decomposition-published.json"
+    tickets.atomic_json(receipt, {"path": "specs/root.tickets/index.json", "sha256": "a" * 64})
+    original = receipt.read_bytes()
     before = permissions.snapshot(run)
-    original = (repo / members[0]).read_bytes()
-    (repo / members[0]).write_text("overwrite old revision")
+    revised = (repo / members[0]).read_text().replace("revision: 1", "revision: 2")
+    (repo / members[0]).write_text(revised)
+    receipt.write_text("{}")
     try:
         with pytest.raises(permissions.PermissionBreach):
             permissions.enforce(run, phase(run, "decomposer"), run.cfg.agents[0], before)
-        assert (repo / members[0]).read_bytes() == original
+        assert receipt.read_bytes() == original
+        assert (repo / members[0]).read_text() == revised
     finally:
         before.cleanup()
+    tickets.write_index(repo, set_path)
     item = tickets.ticket_work_item(run, set_path, members[0])
     run.active_readonly_paths = tickets.validate_work_item(run, item)
     run.active_write_scope = None
     run.cfg.agents[0].writes = ["specs/"]
-    for path in [set_path, *members, "specs/root.md", "specs/root.tickets/r1/index.json"]:
+    for path in [set_path, *members, "specs/root.md", "specs/root.tickets/index.json"]:
         assert not permissions.permitted(path, run.cfg.agents[0], run.cfg, run)
 
 

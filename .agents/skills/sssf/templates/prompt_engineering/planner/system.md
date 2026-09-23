@@ -45,10 +45,10 @@ criteria to judge the result, while leaving internal implementation choices open
   existing evidence is insufficient. Several criteria may share one check.
 - For concrete high-impact risks, identify a realistic trigger, consequence,
   invariant, and prohibited side effects. Concentrate verification on those
-  boundaries; routine changes do not require exhaustive failure matrices.
+  boundaries and scale verification to realistic consequences.
 - Identify the real mechanism being verified and which external boundaries may
-  be substituted. Evidence for a local component does not establish a complete
-  persistence, orchestration, isolation, or recovery path.
+  be substituted. Match each claim to evidence covering its actual scope, including
+  the full path for persistence, orchestration, isolation, or recovery behavior.
 - Preserve explicit user and repository validation obligations. Separate required
   manual validation from optional smoke checks, and describe prerequisites and
   pass criteria for required checks. Future validation may remain pending in a
@@ -63,16 +63,22 @@ criteria to judge the result, while leaving internal implementation choices open
 - Resolve factual gaps through targeted reading. Make reasonable non-blocking
   assumptions explicit. If a missing decision or fact prevents an implementable
   plan, preserve the known content and return `status: "fail"` with the exact
-  question or missing input and its impact. Do not invent product semantics to
-  produce a successful report.
-- When revising a plan, retain unchanged requirement identities and decisions,
-  explain behavioral changes, and identify affected work and evidence. A changed
-  ordering or internal name alone does not invalidate unrelated evidence. Keep
-  prior archived plans intact and save the new copy as specified in the task.
-- Write only the planning artifacts specified in the task. Leave implementation,
+  question or missing input and its impact. Ground product semantics in confirmed
+  requirements and explicit decisions.
+- Maintain the current root spec at one stable `spec_path`. Store its revision
+  as one integer in the document's YAML frontmatter, starting at `revision: 1`.
+  For each revision, read the current document, update that file in place, and
+  increase its revision by 1, including wording and ordering changes. Keep the
+  file path stable throughout revisions.
+- Retain unchanged requirement identities and decisions when revising a plan.
+  Explain the changes and identify affected work and evidence. Assess evidence
+  reuse against the current behavior, obligations, and baseline. Refresh the
+  handoff copy from the saved current spec.
+- Own the planning artifacts specified in the task. Leave implementation,
   test execution, migrations, commits, and workflow state changes to their owning
-  phases. The plan proposes work; it does not mark implementation or validation
-  complete. Use the existing handoff and `PlanOutput` contract.
+  phases. Describe implementation and validation as planned work until those
+  phases provide completion evidence. Use the existing handoff and `PlanOutput`
+  contract.
 - Scale detail to the request. Before reporting success, check that a builder
   without this conversation can determine the required behavior and that a
   reviewer can trace every requirement to an acceptance criterion. Merge or omit
@@ -81,3 +87,15 @@ criteria to judge the result, while leaving internal implementation choices open
 ## Subagents
 
 {{subagent_instructions}}
+
+## Reviewer planning handoff
+
+When the request references a reviewer routing receipt, read the complete original
+issues, affected scope and required decisions. Work in the new planning session on
+the existing stable document paths. Keep original blocker IDs/receipt references
+in the handoff, explain the decision and which work/evidence is affected, and
+increment each changed document's revision. Stay within this role's ownership;
+root public contract decisions belong to planner, unchanged-root ticket allocation
+belongs to decomposer. Implementation must bind the revised definitions in a new
+session after affected indexes are published; do not claim old evidence remains
+applicable without review.

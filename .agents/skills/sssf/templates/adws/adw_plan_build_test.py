@@ -44,7 +44,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                  gates=[gates.artifacts_exist, gates.files_non_empty]))
 
     with run.phase(PhaseParams(name="spec_input", kind="code", owner="tickets",
-                               description="Bind the archived root spec for implementation and all repairs")) as ph:
+                               description="Bind the current root spec for implementation and all repairs")) as ph:
         work_item = tickets.spec_work_item(run.repo_root, plan.spec_path)
         ph.log(work_item=work_item.model_dump())
 

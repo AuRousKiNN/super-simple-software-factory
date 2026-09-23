@@ -109,19 +109,18 @@ QUERY 与 AUDIT 可分别成为执行候选；EXPORT 在 QUERY 的前置交付�
 
 ## 4. 规划工件
 
-沿用 planner 的 spec 归档布局。拆解工件与根 spec 相邻，一张 ticket 一个 Markdown 文件：
+planner 在固定路径维护当前 spec。拆解工件与根 spec 相邻，一张 ticket 一个 Markdown 文件：
 
 ```text
 specs/
 ├── <adw_id>_<slug>.md
 └── <adw_id>_<slug>.tickets/
-    └── r1/
-        ├── ticket-set.md
-        ├── tickets/
-        │   ├── TICKET-QUERY.md
-        │   ├── TICKET-AUDIT.md
-        │   └── TICKET-EXPORT.md
-        └── index.json
+    ├── ticket-set.md
+    ├── tickets/
+    │   ├── TICKET-QUERY.md
+    │   ├── TICKET-AUDIT.md
+    │   └── TICKET-EXPORT.md
+    └── index.json
 ```
 
 | 工件 | 内容与维护者 |
@@ -149,8 +148,8 @@ schema_version: 1
 revision: 1
 source_spec: specs/abc_accounts.md
 tickets:
-  - specs/abc_accounts.tickets/r1/tickets/TICKET-QUERY.md
-  - specs/abc_accounts.tickets/r1/tickets/TICKET-EXPORT.md
+  - specs/abc_accounts.tickets/tickets/TICKET-QUERY.md
+  - specs/abc_accounts.tickets/tickets/TICKET-EXPORT.md
 ---
 
 # 账户能力 Ticket 集合
@@ -208,7 +207,7 @@ Standard 使用最小充分证据。Critical 针对具体高影响后果补充�
 
 ### 5.1 Planner 与 decomposer 输出
 
-`PlanOutput` 新增 `spec_path`，成功输出明确指向权威归档 spec，现有交接文件作为副本。
+`PlanOutput` 新增 `spec_path`，成功输出明确指向当前权威 spec，现有交接文件作为副本。
 
 新增 `DecomposeOutput(EnvelopeBase)`：
 
@@ -346,11 +345,11 @@ fail envelope 持久化后终止当前阶段。上层根据保存的结构化原
 
 ## 9. 修订与来源有效性
 
-根 spec 由 planner 维护并保留归档版本，拆解通过 source_spec 精确引用来源。
+根 spec 由 planner 在固定路径维护，拆解通过 source_spec 引用当前来源，并由内容摘要绑定具体定义。
 
-拆解集合按 r1、r2 等快照保存。首次生成及当前阶段的有界修正使用当前输出目录；发布后重新拆解使用新目录，保留历史工件和稳定 ticket ID。
+拆解集合与各 ticket 在固定的 `<spec>.tickets/` 目录维护。修订直接更新对应文件，保留稳定 ticket ID。根 spec、ticket-set 和单张 ticket 均在文档内记录整数 revision，初始为 1；每次修订加 1，包括文案和展示顺序调整。未修改的文档保持当前 revision。
 
-行为、AC、范围、依赖或显式验证义务改变时递增 ticket revision；文案和展示顺序调整沿用语义 revision。内容摘要记录实际字节，执行始终绑定指定定义。
+发布阶段刷新派生索引，并将索引引用写入当前 session 的 decomposition-published.json。此后修订使用新 session，继续更新原路径文件。已绑定的实现 session 通过内容哈希识别定义变化；新目标重新绑定后执行。
 
 修订说明列出受影响的 tickets 和证据。工作流复用历史证据前确认当前适用性，依据不足时记录阻塞或重新验证。
 
@@ -362,7 +361,7 @@ fail envelope 持久化后终止当前阶段。上层根据保存的结构化原
 |---|---|
 | templates/sssf.config.yaml | 新增 decomposer 并启用 recon；调整角色职责和权限配置 |
 | templates/prompt_engineering/decomposer/ | 新增提示词、subagent_instructions 和 DecomposeOutput 示例 |
-| templates/prompt_engineering/planner/ | 聚焦完整 spec；显式输出 spec_path |
+| templates/prompt_engineering/planner/ | 聚焦完整 spec；显式输出稳定的 spec_path |
 | templates/prompt_engineering/builder/ | spec/ticket 双输入和固定目标的修复规则 |
 | templates/prompt_engineering/reviewer/ | 读取明确审查对象和原 work_item |
 | templates/adws/adw_modules/data_types.py | 输出、ArtifactRef 与 work_item 类型 |

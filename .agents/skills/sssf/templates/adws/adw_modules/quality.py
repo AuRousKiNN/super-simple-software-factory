@@ -36,6 +36,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from . import review_routing
 from .data_types import (EventRecord, QualityCheckResult, QualityCheckSpec, QualityResult,
                          VerifyOutput)
 from .utils import now_iso, operator_env
@@ -67,6 +68,7 @@ def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
     env = operator_env()             # the engineer's own shell environment
 
     run.console.note(f"quality {spec.name}: {command}")
+    input_fingerprint = review_routing.verification_fingerprint(run)
     started_at = now_iso()
     clock = time.monotonic()
     stdout = ""
@@ -86,7 +88,10 @@ def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
     except subprocess.TimeoutExpired as error:
         returncode = 124
         stdout = error.stdout or ""
-        stderr = (error.stderr or "") + f"\nTimed out after {spec.timeout_seconds}s."
+        stderr = error.stderr or ""
+        stdout = stdout.decode(errors="replace") if isinstance(stdout, bytes) else stdout
+        stderr = stderr.decode(errors="replace") if isinstance(stderr, bytes) else stderr
+        stderr += f"\nTimed out after {spec.timeout_seconds}s."
     except OSError as error:
         # A missing binary lands here as exit 127 with the real message — no
         # pre-flight probe needed, and none wanted.
@@ -98,7 +103,7 @@ def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
         f"$ {command}\nexit: {returncode}\nduration_seconds: {duration:.3f}\n"
         f"\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}\n"
     )
-    passed = returncode == 0
+    passed = returncode == 0 and spec.argv != _placeholder(spec.name)
     run.tracer.event(EventRecord(
         adw_id=run.adw_id,
         phase_id=phase.phase_id,
@@ -128,6 +133,7 @@ def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
         passed=passed,
         duration_seconds=duration,
         output_artifact=str(output_artifact),
+        input_fingerprint=input_fingerprint,
         output_tail=(stdout + stderr)[-TAIL_CHARS:],
     )
 
@@ -135,42 +141,47 @@ def _run(spec: QualityCheckSpec, run) -> QualityCheckResult:
 # ── Blocks ────────────────────────────────────────────────────────────────────
 # Replace every argv below. See the banner at the top of this file.
 
+def check_specs() -> dict[str, QualityCheckSpec]:
+    """Stable check IDs accepted by review routing. Replace placeholder argv here."""
+    return {
+        "test": QualityCheckSpec(name="test", area="backend", operation="build",
+                                 argv=_placeholder("test"), timeout_seconds=600),
+        "lint": QualityCheckSpec(name="lint", area="backend", operation="lint", argv=_placeholder("lint")),
+        "typecheck": QualityCheckSpec(name="typecheck", area="backend", operation="typecheck", argv=_placeholder("typecheck")),
+        "build": QualityCheckSpec(name="build", area="backend", operation="build", argv=_placeholder("build")),
+    }
+
+
+def configured_checks() -> set[str]:
+    return {name for name, spec in check_specs().items() if spec.argv != _placeholder(spec.name)}
+
+
 def test(run) -> QualityCheckResult:
-    """Run the project's test suite. The highest-value block to wire up first."""
-    return _run(QualityCheckSpec(
-        name="test",
-        area="backend",
-        operation="build",
-        argv=_placeholder("test"),        # e.g. ["bun", "test"] or ["uv", "run", "pytest", "-q"]
-        timeout_seconds=600,
-    ), run)
+    return _run(check_specs()["test"], run)
 
 
 def lint(run) -> QualityCheckResult:
-    return _run(QualityCheckSpec(
-        name="lint",
-        area="backend",
-        operation="lint",
-        argv=_placeholder("lint"),        # e.g. ["bun", "x", "oxlint@1.36.0", "src"]
-    ), run)
+    return _run(check_specs()["lint"], run)
 
 
 def typecheck(run) -> QualityCheckResult:
-    return _run(QualityCheckSpec(
-        name="typecheck",
-        area="backend",
-        operation="typecheck",
-        argv=_placeholder("typecheck"),   # e.g. ["bun", "x", "tsc", "--noEmit"]
-    ), run)
+    return _run(check_specs()["typecheck"], run)
 
 
 def build(run) -> QualityCheckResult:
-    return _run(QualityCheckSpec(
-        name="build",
-        area="backend",
-        operation="build",
-        argv=_placeholder("build"),       # e.g. ["bun", "build", "src/index.ts", "--outdir", str(output_dir)]
-    ), run)
+    return _run(check_specs()["build"], run)
+
+
+def run_selected(run, names: list[str]) -> QualityResult:
+    """Run only allowlisted, configured checks; reviewer text is never executable."""
+    missing = set(names) - configured_checks()
+    if not names or missing:
+        raise ValueError(f"no configured checks for {sorted(missing) if missing else names}")
+    specs = check_specs()
+    checks = [_run(specs[name], run) for name in dict.fromkeys(names)]
+    return QualityResult(passed=all(c.passed for c in checks), checks=checks,
+                         failures=[f"{c.name}: exit {c.returncode}\n{c.output_tail}" for c in checks if not c.passed],
+                         artifacts=[c.output_artifact for c in checks])
 
 
 def run_tests(run) -> QualityResult:

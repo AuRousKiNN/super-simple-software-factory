@@ -88,3 +88,15 @@ Three distinctions worth keeping straight:
 ## Keep scripts thin
 
 An ADW is sequencing and acceptance — nothing else. The moment you are writing parsing, subprocess handling, retry mechanics, or a reusable predicate inside `adw_*.py`, it belongs in `adw_modules/`. See `update_modules.md`.
+
+## Route review verdicts
+
+Use `review_routing.decide` (or `acceptance_decision` when code checks are required)
+with explicit remaining repair/verification budgets and `quality.configured_checks()`.
+Persist each decision with `review_routing.save` inside a code phase. End handoffs
+with `run.finish(accepted=False, reason=decision.reason)`. Never infer repairability
+from `approved=false`, nor run commands supplied in reviewer prose. Include
+`verdict_consistent` and `obligations_retained` gates on repeated reviews.
+
+See [Reviewer routing and recheck](../references/reviewer-routing.md) for the
+structured contract, explicit evidence-only entry point and planning handoffs.

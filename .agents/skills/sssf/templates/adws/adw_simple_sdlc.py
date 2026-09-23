@@ -8,9 +8,8 @@ Usage:
     uv run adws/adw_simple_sdlc.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4]
 
 Phases: engineer(request) -> planner -> git(commit_plan)
-        -> builder -> code(test) [-> builder(fix) -> code(test) ... bounded]
-        -> [code(changes) -> reviewer -> builder(revise)] bounded
-        -> code(retest, only if a revision changed code)
+        -> builder -> code(test) -> code(changes) -> reviewer -> code(route)
+        -> [builder(revise) -> code(test) | code(verify) -> reviewer -> code(route)] bounded
         -> git(commit_build) -> code(changes) -> documenter -> git(commit_docs)
 
 Three commits, three work products, three authors. The plan, the code, and the
@@ -21,8 +20,8 @@ ever reused for another agent's diff.
 
 Testing is CODE, not an agent. `bun test` is a command, not a judgement call:
 an agent rediscovering it every run costs a million tokens to learn what a
-subprocess already knows. Failures travel back to the builder as an envelope,
-so the repair loop is unchanged — only the runner became free and repeatable.
+subprocess already knows. Actual evidence reaches the reviewer, which classifies
+implementation defects, missing checks and external conditions for Python routing.
 
 Two different questions still get asked, in order. The suite asks "does it
 run"; the reviewer asks "is this what was asked for", against `plan.md` — and
@@ -44,14 +43,14 @@ pinned before the first commit phase and printed in the request phase.
 import argparse
 import sys
 
-from adw_modules import agents, changes, gates, git_helper, quality, session, tickets, utils
+from adw_modules import agents, changes, gates, git_helper, quality, review_routing, session, tickets, utils
 from adw_modules.data_types import (AgentCall, BuildOutput, ChangeCapture,
                                     DocumentOutput, PhaseParams, PlanOutput,
                                     ReviewOutput)
 
 REQUIRED_AGENTS = ["planner", "builder", "reviewer", "documenter"]
-MAX_FIX_LOOPS = 3
-MAX_REVISION_LOOPS = 2
+MAX_REVISION_LOOPS = 3
+MAX_VERIFICATION_LOOPS = 2
 
 DOCUMENT_NOTES = ("Read diff_path in full before writing. Document only what the "
                   "diff shows, then copy the write-up into app_docs/ as your task "
@@ -105,7 +104,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         build_base = commit(ph, plan)
 
     with run.phase(PhaseParams(name="spec_input", kind="code", owner="tickets",
-                               description="Bind the archived root spec for implementation and all repairs")) as ph:
+                               description="Bind the current root spec for implementation and all repairs")) as ph:
         work_item = tickets.spec_work_item(run.repo_root, plan.spec_path)
         ph.log(work_item=work_item.model_dump())
 
@@ -113,78 +112,82 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                                description="Implement the plan exactly")) as ph:
         build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, work_item=work_item, previous=plan))
 
-    test = None
-    for i in range(1, MAX_FIX_LOOPS + 1):
-        with run.phase(PhaseParams(name=f"test_{i}", kind="code", owner="quality",
-                                   description="Run the suite — a known command, so code runs "
-                                               "it and no agent has to rediscover it")) as ph:
-            test = quality.run_tests(run)
-            record(ph, test)
-
-        if test.passed:
-            break
-
-        with run.phase(PhaseParams(name=f"fix_{i}", kind="agent", owner="builder", retries=1,
-                                   description="Repair what the suite reported, from its "
-                                               "verbatim output")) as ph:
-            build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, work_item=work_item,
-                                      previous=quality.as_envelope(test, "tests")))
-
-    review = None
-    revised = False
-    for i in range(1, MAX_REVISION_LOOPS + 1):
-        with run.phase(PhaseParams(name=f"changes_review_{i}", kind="code", owner="git",
-                                   description="Capture code since the plan commit so review uses Git facts")) as ph:
-            review_input = capture_changes(ph, build_base, "Review this code against the plan.")
-
-        with run.phase(PhaseParams(name=f"review_{i}", kind="agent", owner="reviewer",
-                                   description="Confirm the build matches the plan")) as ph:
+    repairs = verifications = round_number = 0
+    previous_review = None
+    results = {}
+    needs_test = True
+    while True:
+        round_number += 1
+        if needs_test:
+            with run.phase(PhaseParams(name=f"test_{round_number}", kind="code", owner="quality",
+                                       description="Run required tests against the latest builder output")) as ph:
+                test = quality.run_tests(run)
+                record(ph, test)
+                results.update({c.name: c for c in test.checks})
+            needs_test = False
+        with run.phase(PhaseParams(name=f"changes_review_{round_number}", kind="code", owner="git",
+                                   description="Capture the current implementation and verification evidence")) as ph:
+            results = review_routing.refresh_results(run, results)
+            review_input = capture_changes(ph, build_base, review_routing.evidence_notes(results))
+        with run.phase(PhaseParams(name=f"review_{round_number}", kind="agent", owner="reviewer", retries=1,
+                                   description="Judge the bound target and classify defects or missing proof")) as ph:
             review = ph.call(AgentCall(output_type=ReviewOutput, prompt=prompt, work_item=work_item, previous=review_input,
-                                       gates=[gates.artifacts_exist, gates.verdict_consistent]))
-
-        if review.approved or i == MAX_REVISION_LOOPS:
+                                       gates=[gates.artifacts_exist, gates.verdict_consistent,
+                                              gates.obligations_retained(previous_review)]))
+        previous_review = review
+        with run.phase(PhaseParams(name=f"route_{round_number}", kind="code", owner="review_routing",
+                                   description="Save complete review ownership and enforce bounded routing")) as ph:
+            results = review_routing.refresh_results(run, results)
+            decision = review_routing.acceptance_decision(review, review_routing.RoutingPolicy(
+                repair_remaining=MAX_REVISION_LOOPS - repairs,
+                verification_remaining=MAX_VERIFICATION_LOOPS - verifications,
+                checks=quality.configured_checks()), results, ["test"])
+            if decision.action == "repair" and (set(results) - {"test"}) and verifications >= MAX_VERIFICATION_LOOPS:
+                decision = decision.model_copy(update={"action": "handoff", "reason": "verification budget exhausted; repair would invalidate existing checks"})
+            receipt = review_routing.save(run, review, decision,
+                review_routing.ReceiptContext(prompt, build_base, work_item, sorted({"test", *results})))
+            ph.log(receipt=str(receipt), **decision.model_dump())
+        if decision.action == "handoff":
+            return run.finish(accepted=False, reason=decision.reason)
+        if decision.action == "approve":
             break
+        if decision.action == "repair":
+            repairs += 1
+            with run.phase(PhaseParams(name=f"revise_{repairs}", kind="agent", owner="builder", retries=1,
+                                       description="Repair implementation or test defects within the bound target")) as ph:
+                build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, work_item=work_item, previous=review))
+            pending = sorted((set(results) | set(decision.checks)) - {"test"})
+            results = {}
+            needs_test = True
+        else:
+            pending = decision.checks
+        if pending:
+            verifications += 1
+            with run.phase(PhaseParams(name=f"verify_{verifications}", kind="code", owner="quality",
+                                       description="Execute the requested configured checks before re-review")) as ph:
+                result = quality.run_selected(run, pending)
+                results.update({c.name: c for c in result.checks})
+                record(ph, result)
 
-        with run.phase(PhaseParams(name=f"revise_{i}", kind="agent", owner="builder", retries=1,
-                                   description="Close the reviewer's blocking findings")) as ph:
-            build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt, work_item=work_item, previous=review))
-            revised = True
+    with run.phase(PhaseParams(name="commit_build", kind="code", owner="git",
+                               description="Land the code only now: green suite, approved review")) as ph:
+        commit(ph, build)
 
-    # A revision edited code after the suite last ran, so the green light is
-    # stale. Re-run it rather than commit on a result that predates the change.
-    if revised and review is not None and review.approved:
-        with run.phase(PhaseParams(name="retest", kind="code", owner="quality",
-                                   description="Re-run the suite — the revision changed code "
-                                               "after the last green result")) as ph:
-            test = quality.run_tests(run)
-            record(ph, test)
+    with run.phase(PhaseParams(name="changes", kind="code", owner="git",
+                               description="Diff the whole run against its pinned baseline, for the documenter")) as ph:
+        document_input = capture_changes(ph, baseline, DOCUMENT_NOTES)
 
-    # Red tests or a rejected review stop the chain here: the code stays
-    # uncommitted and nothing is documented, because there is nothing worth
-    # describing yet. The plan commit stands — it is a record of what was asked.
-    verified = (test is not None and test.passed
-                and review is not None and review.approved)
-    if verified:
-        with run.phase(PhaseParams(name="commit_build", kind="code", owner="git",
-                                   description="Land the code only now: green suite, approved review")) as ph:
-            commit(ph, build)
+    with run.phase(PhaseParams(name="document", kind="agent", owner="documenter", retries=1,
+                               description="Write up the completed change")) as ph:
+        document = ph.call(AgentCall(output_type=DocumentOutput, prompt=prompt,
+                                     previous=document_input,
+                                     gates=[gates.artifacts_exist, gates.files_non_empty]))
 
-        with run.phase(PhaseParams(name="changes", kind="code", owner="git",
-                                   description="Diff the whole run against its pinned baseline, for the documenter")) as ph:
-            document_input = capture_changes(ph, baseline, DOCUMENT_NOTES)
+    with run.phase(PhaseParams(name="commit_docs", kind="code", owner="git",
+                               description="Ship the write-up in its own commit, beside the code it describes")) as ph:
+        commit(ph, document)
 
-        with run.phase(PhaseParams(name="document", kind="agent", owner="documenter", retries=1,
-                                   description="Write up the completed change")) as ph:
-            document = ph.call(AgentCall(output_type=DocumentOutput, prompt=prompt,
-                                         previous=document_input,
-                                         gates=[gates.artifacts_exist, gates.files_non_empty]))
-
-        with run.phase(PhaseParams(name="commit_docs", kind="code", owner="git",
-                                   description="Ship the write-up in its own commit, beside the code it describes")) as ph:
-            commit(ph, document)
-
-    return run.finish(accepted=verified,
-                      reason="the suite or the review never came back clean")
+    return run.finish(accepted=True, reason="review and current mandatory checks passed")
 
 
 if __name__ == "__main__":

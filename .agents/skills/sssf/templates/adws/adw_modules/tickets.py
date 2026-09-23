@@ -157,28 +157,42 @@ def spec_work_item(root: Path, value: str) -> SpecWorkItem:
 def prepare_decomposition(run, spec_path: str) -> DecompositionInput:
     source = artifact(run.repo_root, spec_path)
     saved = run.session_dir / "decomposition.json"
+    if (run.session_dir / "decomposition-published.json").exists():
+        raise TicketError("decomposition already published; start a new session to revise planning")
     if saved.exists():
         result = DecompositionInput.model_validate_json(saved.read_text())
-        if repo_path(run.repo_root, result.output_dir + "/index.json").exists():
-            raise TicketError("decomposition revision already published; start a new session for a new revision")
         if result.spec != source:
             raise TicketError("decomposition source changed; use matching input or a new session")
         return result
-    base = Path(spec_path).with_suffix(".tickets")
-    revision = 1
-    while repo_path(run.repo_root, (base / f"r{revision}").as_posix()).exists():
-        revision += 1
-    result = DecompositionInput(spec=source, output_dir=(base / f"r{revision}").as_posix(), revision=revision)
-    # Reserve a revision even when the agent fails before writing an artifact.
-    repo_path(run.repo_root, result.output_dir).mkdir(parents=True)
+    output_dir = Path(spec_path).with_suffix(".tickets").as_posix()
+    result = DecompositionInput(spec=source, output_dir=output_dir)
+    repo_path(run.repo_root, output_dir).mkdir(parents=True, exist_ok=True)
     atomic_json(saved, result.model_dump())
     return result
+
+
+def publish_decomposition(run, target: DecompositionInput, output: DecomposeOutput) -> ArtifactRef:
+    """Publish the current index and close this session's planning binding."""
+    if prepare_decomposition(run, target.spec.path) != target:
+        raise TicketError("decomposition input differs from the host binding")
+    if output.status != "success" or output.outcome != "ready":
+        raise TicketError("decomposition must be ready before publishing")
+    set_file = repo_path(run.repo_root, output.ticket_set_path)
+    output_dir = repo_path(run.repo_root, target.output_dir)
+    if not set_file.is_relative_to(output_dir):
+        raise TicketError("ticket set is outside the bound output directory")
+    payload = read_set(run.repo_root, output.ticket_set_path)
+    if payload["spec"] != target.spec.model_dump():
+        raise TicketError("ticket set source differs from dispatched source")
+    ref = write_index(run.repo_root, output.ticket_set_path)
+    atomic_json(run.session_dir / "decomposition-published.json", ref.model_dump())
+    return ref
 
 
 def decompose(run, spec_path: str) -> DecomposeOutput:
     from .data_types import AgentCall, PhaseParams
     with run.phase(PhaseParams(name="decomposition_input", kind="code", owner="tickets",
-                              description="Bind the source digest and reserve a planning revision")) as ph:
+                              description="Bind the source digest and stable planning directory")) as ph:
         target = prepare_decomposition(run, spec_path)
         ph.log(**target.model_dump())
     with run.phase(PhaseParams(name="decompose", kind="agent", owner="decomposer",
@@ -187,15 +201,7 @@ def decompose(run, spec_path: str) -> DecomposeOutput:
                                    decomposition=target))
     with run.phase(PhaseParams(name="ticket_index", kind="code", owner="tickets",
                               description="Read planning metadata and publish its machine index")) as ph:
-        verify_ref(run.repo_root, target.spec)
-        set_file = repo_path(run.repo_root, output.ticket_set_path)
-        output_dir = repo_path(run.repo_root, target.output_dir)
-        if not set_file.is_relative_to(output_dir):
-            raise TicketError("ticket set is outside the bound output directory")
-        payload = read_set(run.repo_root, output.ticket_set_path)
-        if payload["spec"] != target.spec.model_dump():
-            raise TicketError("ticket set source differs from dispatched source")
-        ref = write_index(run.repo_root, output.ticket_set_path)
+        ref = publish_decomposition(run, target, output)
         ph.log(derived_artifact=ref.model_dump())
     return output
 

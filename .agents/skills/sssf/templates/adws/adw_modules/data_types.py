@@ -136,7 +136,6 @@ class DecompositionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     spec: ArtifactRef
     output_dir: str
-    revision: int = Field(ge=1)
 
 
 class AcceptanceRecord(BaseModel):
@@ -179,12 +178,90 @@ class ReviewFinding(BaseModel):
     evidence: str = ""              # where it lives, or what is missing
 
 
-class ReviewOutput(EnvelopeBase):
-    """Confirmation that what was built is what was asked for — not a test run."""
+ReviewBlockerKind = Literal[
+    "implementation", "test_implementation", "check_execution", "spec_conflict",
+    "ticket_conflict", "environment", "manual_validation", "external_regression",
+    "protocol_issue",
+]
+ReviewOwner = Literal["builder", "quality", "planner", "decomposer", "environment", "human", "external"]
 
+
+class ReviewBlocker(BaseModel):
+    """One independently actionable gap; semantic consistency is checked by a gate."""
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    kind: ReviewBlockerKind
+    owner: ReviewOwner
+    description: str
+    basis: list[str]
+    trigger: str
+    consequence: str
+    evidence: list[str]
+    closure: str
+    handoff: str
+    checks: list[str] = Field(default_factory=list)
+    preconditions: str = ""
+    steps: list[str] = Field(default_factory=list)
+    pass_criteria: str = ""
+    affected_tickets: list[str] = Field(default_factory=list)
+    invalidated_evidence: list[str] = Field(default_factory=list)
+
+
+class ReviewObligation(BaseModel):
+    """Mandatory verification owned by this review, including required manual work."""
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    description: str
+    satisfied: bool
+    evidence: list[str] = Field(default_factory=list)
+
+
+class ReviewOutput(EnvelopeBase):
+    """A completed review can reject the target without failing its execution."""
     approved: bool = False
     findings: list[ReviewFinding] = Field(default_factory=list)
-    blocking: list[str] = Field(default_factory=list)   # what must change before approval
+    blocking: list[ReviewBlocker] = Field(default_factory=list)
+    required_verification: list[ReviewObligation] = Field(default_factory=list)
+
+
+class ReviewDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["approve", "repair", "verify", "handoff"]
+    reason: str
+    owners: list[str] = Field(default_factory=list)
+    checks: list[str] = Field(default_factory=list)
+
+
+class ReviewReceipt(BaseModel):
+    """Host-owned review snapshot, used as the explicit recheck source."""
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1] = 1
+    adw_id: str
+    prompt: str
+    work_item: SpecWorkItem | TicketWorkItem | None = Field(default=None, discriminator="kind")
+    baseline: str
+    tree_sha256: str
+    tree_files: dict[str, str]
+    build_base: str
+    review: ReviewOutput
+    decision: ReviewDecision
+    mandatory_checks: list[str] = Field(default_factory=list)
+    reports: dict[str, str] = Field(default_factory=dict)
+
+
+class RecheckEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    artifact: ArtifactRef
+    resolves: list[str] = Field(min_length=1)
+    applicability: str = Field(min_length=1)
+
+
+class RecheckRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    original_review: ArtifactRef
+    baseline: str = Field(min_length=1)
+    evidence: list[RecheckEvidence] = Field(min_length=1)
+    checks: list[str] = Field(default_factory=list)
 
 
 class DocumentOutput(EnvelopeBase):
@@ -222,6 +299,8 @@ class QualityCheckResult(BaseModel):
     passed: bool
     duration_seconds: float
     output_artifact: str
+    input_fingerprint: str = ""
+    applicable: bool = True
     # The tail of stdout+stderr, verbatim and unparsed. A failure has to travel
     # back to the builder as an envelope, and the builder cannot open a log file
     # it was never handed — so the evidence rides along. Deliberately raw: every

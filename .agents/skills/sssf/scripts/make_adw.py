@@ -37,7 +37,7 @@ Phases: engineer(request) -> {chain}
 import argparse
 import sys
 
-from adw_modules import agents, changes, gates, git_helper, session, tickets, utils
+from adw_modules import agents, changes, gates, git_helper, review_routing, session, tickets, utils
 from adw_modules.data_types import AgentCall, ChangeCapture, PhaseParams, TicketSelection, {imports}
 
 REQUIRED_AGENTS = {agents_list}
@@ -75,10 +75,10 @@ if __name__ == "__main__":
 
 PHASE = '''    # TODO: replace this description — say what THIS phase does and why.
     with run.phase(PhaseParams(name="{name}", kind="agent", owner="{agent}",
-                               description="Run {agent} over the request and hand its envelope on")) as ph:
+                               retries=1, description="Run {agent} over the request and hand its envelope on")) as ph:
         previous = ph.call(AgentCall(output_type={output_type}, prompt=prompt,
                                      previous=previous, work_item=work_item,
-                                     gates=[gates.artifacts_exist]))
+                                     gates=[gates.artifacts_exist{review_gate}]))
 '''
 
 CHANGES_PHASE = '''    with run.phase(PhaseParams(name="{name}", kind="code", owner="git",
@@ -118,9 +118,18 @@ def main() -> int:
                               '        work_item = tickets.select_ticket(run, previous, selection)\n'
                               '        ph.log(work_item=work_item.model_dump())\n')
         else:
-            phases.append(PHASE.format(name=phase_name, agent=agent, output_type=output_type))
+            phases.append(PHASE.format(name=phase_name, agent=agent, output_type=output_type,
+                                       review_gate=", gates.verdict_consistent" if agent == "reviewer" else ""))
         if agent == "reviewer":
-            phases.append('    accepted = accepted and previous.approved\n')
+            phases.append(f'''    with run.phase(PhaseParams(name="route_{phase_name}", kind="code", owner="review_routing",
+                               description="Persist review ownership and stop unapproved one-shot delivery")) as ph:
+        decision = review_routing.decide(previous, review_routing.RoutingPolicy())
+        receipt = review_routing.save(run, previous, decision,
+            review_routing.ReceiptContext(prompt, build_base, work_item))
+        ph.log(receipt=str(receipt), **decision.model_dump())
+    if decision.action != "approve":
+        return run.finish(accepted=False, reason=decision.reason)
+''')
         if agent == "planner":
             phases.append('    source_spec = previous.spec_path\n')
         if agent == "planner" and "decomposer" not in agent_names:
@@ -142,7 +151,7 @@ def main() -> int:
         prompt_expression=("args.prompt" if "decomposer" in agent_names and "planner" not in agent_names[:agent_names.index("decomposer")] else "utils.resolve_prompt(args.prompt)"),
         agents_list=repr(sorted(set(agent_names))),
         build_base=('    build_base = git_helper.rev("HEAD")'
-                    if "builder" in agent_names else ""),
+                    if "builder" in agent_names or "reviewer" in agent_names else ""),
         phases="\n".join(phases),
     )
 

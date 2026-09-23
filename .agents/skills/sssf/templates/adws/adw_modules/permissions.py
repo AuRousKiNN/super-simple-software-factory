@@ -62,6 +62,9 @@ def _glob(pattern: str) -> re.Pattern:
 
 
 INDEX_PATH = "@git-index"
+HOST_SESSION_FILES = (
+    "work_item.json", "decomposition.json", "decomposition-published.json", "ticket-acceptance.json", "review-routing/*.json",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,8 +281,7 @@ def _host_patterns(run) -> list[str]:
     if not sessions.resolve().is_relative_to(root):
         return []
     prefix = sessions.resolve().relative_to(root).as_posix()
-    return [f"{prefix}/*/{name}" for name in
-            ("work_item.json", "decomposition.json", "ticket-acceptance.json")]
+    return [f"{prefix}/*/{name}" for name in HOST_SESSION_FILES]
 
 
 def _extra_patterns(run) -> list[str]:
@@ -296,7 +298,7 @@ def _input_paths(run) -> list[str]:
     sessions = Path(run.cfg.defaults.data_dir) / "sessions"
     if not sessions.is_absolute():
         sessions = root / sessions
-    for name in ("work_item.json", "decomposition.json", "ticket-acceptance.json"):
+    for name in HOST_SESSION_FILES:
         for path in sessions.glob(f"*/{name}"):
             if path.resolve().is_relative_to(root):
                 paths.append(path.relative_to(root).as_posix())

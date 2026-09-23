@@ -2,7 +2,7 @@
 # /// script
 # dependencies = ["openai-codex==0.155.1", "pydantic", "python-dotenv", "pyyaml", "rich"]
 # ///
-"""ADW Decompose — validate and decompose one explicit archived spec.
+"""ADW Decompose — validate and decompose one explicit current spec.
 
 Usage: uv run adws/adw_decompose.py --spec specs/request.md
 Phases: code(input) -> decomposer -> code(index)

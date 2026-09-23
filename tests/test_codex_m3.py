@@ -31,6 +31,7 @@ from adw_modules.data_types import (  # noqa: E402
     DocumentOutput,
     PlanOutput,
     QualityResult,
+    QualityCheckResult,
     ReviewOutput,
     SSSFConfig,
     SubagentConfig,
@@ -426,7 +427,7 @@ class _PhaseHandle:
         if self.params.owner == "reviewer":
             return ReviewOutput(
                 status="success", summary="approved", approved=True,
-                artifacts=["review.md"],
+                artifacts=["review.md"], findings=[dict(requirement="REQ-01", met=True, evidence="src.py")],
             )
         if self.params.owner == "documenter":
             return DocumentOutput(
@@ -468,7 +469,7 @@ def test_complete_sdlc_chain_reaches_documentation(monkeypatch, tmp_path) -> Non
     monkeypatch.setattr(
         adw_simple_sdlc.quality,
         "run_tests",
-        lambda _run: QualityResult(passed=True),
+        lambda _run: QualityResult(passed=True, checks=[QualityCheckResult(name="test", area="backend", operation="build", command="pytest", returncode=0, passed=True, duration_seconds=0, output_artifact="test.log")]),
     )
     changeset = ChangeSet(
         base=BaseRef(ref="main", commit="a" * 40, reason="pinned"),
@@ -487,10 +488,12 @@ def test_complete_sdlc_chain_reaches_documentation(monkeypatch, tmp_path) -> Non
         lambda *_args: ChangesOutput(status="success", changed_files=["src.py"]),
     )
 
+    monkeypatch.setattr(adw_simple_sdlc.review_routing, "refresh_results", lambda _run, results: results)
+    monkeypatch.setattr(adw_simple_sdlc.review_routing, "save", lambda *_args: tmp_path / "receipt.json")
     assert adw_simple_sdlc.main("build it") == 0
     assert [phase.name for phase in run.phases] == [
         "request", "plan", "commit_plan", "spec_input", "build", "test_1",
-        "changes_review_1", "review_1", "commit_build", "changes", "document",
+        "changes_review_1", "review_1", "route_1", "commit_build", "changes", "document",
         "commit_docs",
     ]
     review_call = next(call for name, call in run.calls if name == "review_1")

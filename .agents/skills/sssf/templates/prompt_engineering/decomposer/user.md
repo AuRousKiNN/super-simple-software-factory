@@ -15,8 +15,16 @@
 {{context_handoff_dir}}
 
 Read the bound source spec, preserve its bytes, investigate relevant repository
-facts, and write the following inside output_dir. All structured paths must be
-repository-relative POSIX paths. Use the bound revision for the set.
+facts, and maintain the following documents inside output_dir. Use stable paths
+for the current ticket set and its tickets, and repository-relative POSIX paths
+in structured fields.
+
+Read existing documents before revising them. Give each new document revision: 1
+in its YAML frontmatter. For each revision, update the corresponding file in place
+and increase that document's revision by 1, including wording and ordering changes.
+Unchanged documents keep their revision. Keep each document's revision count in
+that document and its file path stable. The examples below show initial revisions;
+fill in the current values and actual paths for this task.
 
 `ticket-set.md`:
 ```markdown
@@ -25,7 +33,7 @@ schema_version: 1
 revision: 1
 source_spec: specs/example.md
 tickets:
-  - specs/example.tickets/r1/tickets/TICKET-QUERY.md
+  - <output_dir>/tickets/TICKET-QUERY.md
 ---
 # Ticket set
 ## Integration obligations
@@ -61,14 +69,15 @@ Required checks, regression protection, reusable evidence and residual risks.
 ```
 
 Prefer kind behavior/refactor/integration and profile standard/critical. Use stable
-IDs and explain real blocked_by prerequisites. The examples are writing guidance;
-Markdown headings, AC presentation, identifiers and frontmatter schemas are not
-machine-validated. The index reads source_spec/tickets from set metadata and
-id/blocked_by plus descriptive metadata from tickets. Keep those references usable.
+IDs and explain real blocked_by prerequisites. Adapt headings and AC presentation
+to make the handoff self-contained. The index reads source_spec/tickets from set
+metadata and id/blocked_by plus descriptive metadata from tickets. Keep those
+references usable and the set's membership consistent with the current tickets.
 
 ## Report
 
-Emit ONLY JSON matching DecomposeOutput, listing all actually saved artifacts:
+Emit a single JSON object matching DecomposeOutput, listing all actually saved
+artifacts:
 ```json
 {
   "status": "success",

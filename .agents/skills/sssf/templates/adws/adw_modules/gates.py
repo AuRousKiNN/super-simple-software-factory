@@ -66,23 +66,72 @@ def verdict_consistent(envelope: EnvelopeBase, run) -> GateReport:
     rejection that names no problem, is a claim the harness can refute without
     reading a line of the diff.
     """
-    report = GateReport()
-    approved = bool(getattr(envelope, "approved", False))
-    blocking = list(getattr(envelope, "blocking", []))
-    unmet = [f.requirement for f in getattr(envelope, "findings", []) if not f.met]
+    from .review_routing import BLOCKER_OWNERS
+    from .data_types import ReviewOutput
 
-    report.check("approved vs blocking", not (approved and blocking),
-                 "no blocking items" if not blocking
-                 else f"{len(blocking)} blocking item(s) while approved=true"
-                 if approved else f"{len(blocking)} blocking item(s), not approved")
-    report.check("approved vs findings", not (approved and unmet),
-                 "every requirement met" if not unmet
-                 else f"{len(unmet)} unmet requirement(s) while approved=true"
-                 if approved else f"{len(unmet)} unmet requirement(s), not approved")
-    report.check("rejection names a problem", approved or bool(blocking or unmet),
-                 "verdict is supported" if approved or blocking or unmet
-                 else "approved=false but no blocking item or unmet requirement was given")
+    report = GateReport()
+    if not isinstance(envelope, ReviewOutput):
+        return report.check("review type", False, "verdict gate requires ReviewOutput")
+    review = envelope
+    report.check("review completed", review.status == "success", "business verdicts require status=success")
+    report.check("requirements present", bool(review.findings), "review must judge its target requirements")
+    report.check("approved vs blocking", not (review.approved and review.blocking), "approval requires no blockers")
+    report.check("rejection names a problem", review.approved or bool(review.blocking),
+                 "rejection requires structured blockers for deterministic routing")
+    ids = [b.id for b in review.blocking]
+    report.check("unique blocker ids", len(ids) == len(set(ids)), "blocker IDs must be unique")
+    covered = {basis for b in review.blocking for basis in b.basis}
+    for finding in review.findings:
+        report.check(f"finding {finding.requirement}", bool(finding.requirement.strip() and finding.evidence.strip()),
+                     "requirement and evidence must be explicit")
+        report.check(f"unmet {finding.requirement}", finding.met or (not review.approved and finding.requirement in covered),
+                     "unmet findings must be covered verbatim in a blocker's basis")
+    obligation_ids = [o.id for o in review.required_verification]
+    report.check("unique obligation ids", len(obligation_ids) == len(set(obligation_ids)), "obligation IDs must be unique")
+    for obligation in review.required_verification:
+        report.check(f"obligation {obligation.id}", bool(obligation.id.strip() and obligation.description.strip()),
+                     "mandatory obligations need an identity and description")
+        report.check(f"proof {obligation.id}", not obligation.satisfied or bool(obligation.evidence) and all(e.strip() for e in obligation.evidence),
+                     "satisfied obligations need evidence")
+        report.check(f"pending {obligation.id}", obligation.satisfied or (not review.approved and obligation.id in covered),
+                     "pending mandatory obligations must block approval and name a blocker")
+    for blocker in review.blocking:
+        required = [blocker.id, blocker.description, blocker.trigger, blocker.consequence, blocker.closure, blocker.handoff]
+        report.check(f"blocker {blocker.id} detail", all(v.strip() for v in required)
+                     and bool(blocker.basis) and all(v.strip() for v in blocker.basis)
+                     and bool(blocker.evidence) and all(v.strip() for v in blocker.evidence),
+                     "basis, trigger, impact, evidence, closure and handoff are required")
+        report.check(f"blocker {blocker.id} owner", blocker.owner == BLOCKER_OWNERS[blocker.kind],
+                     "owner must match the structured problem kind")
+        report.check(f"blocker {blocker.id} checks", (bool(blocker.checks) and all(c.strip() for c in blocker.checks))
+                     if blocker.kind == "check_execution" else not blocker.checks,
+                     "only check_execution names configured check IDs; at least one is required")
+        if blocker.kind == "manual_validation":
+            report.check(f"blocker {blocker.id} manual", bool(blocker.preconditions.strip() and blocker.pass_criteria.strip())
+                         and bool(blocker.steps) and all(s.strip() for s in blocker.steps),
+                         "required manual validation needs preconditions, steps and pass criteria")
+        report.check(f"blocker {blocker.id} integration", not blocker.invalidated_evidence or bool(blocker.affected_tickets),
+                     "invalidated integration evidence must identify affected tickets")
     return report
+
+
+def obligations_retained(previous):
+    """Keep the same review target and mandatory obligations across repair/recheck."""
+    def gate(envelope, run):
+        report = GateReport()
+        if previous is None:
+            return report
+        requirements = {f.requirement for f in envelope.findings}
+        obligations = {o.id for o in envelope.required_verification}
+        for finding in previous.findings:
+            report.check(f"retained {finding.requirement}", finding.requirement in requirements,
+                         "the review target cannot silently lose a requirement")
+        for obligation in previous.required_verification:
+            report.check(f"retained {obligation.id}", obligation.id in obligations,
+                         "an existing mandatory obligation must be re-evaluated, not omitted")
+        return report
+    gate.__name__ = "obligations_retained"
+    return gate
 
 
 def tests_pass(command: str):
