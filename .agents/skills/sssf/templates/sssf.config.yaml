@@ -3,7 +3,7 @@ schema_version: 2
 
 defaults:
   coding_agent: codex
-  model: gpt-5.6-terra             # exact Codex model id; availability is preflighted
+  model: gpt-6-sol                 # exact Codex model id; availability is preflighted
   thinking: medium                 # none|minimal|low|medium|high|xhigh|max|ultra
   subagents:
     enabled: false                 # opt in only on planner/scout/decomposer; other roles stay single-threaded
@@ -39,7 +39,8 @@ observability:
 
 agents:
   - name: planner
-    thinking: high
+    model: gpt-6-astra
+    thinking: xhigh
     color: "#a78bfa"                 # optional hex — the agent's lane color in the visualizer
     purpose: Turn a request into a grounded, self-contained plan with observable acceptance criteria.
     prompt_engineering:
@@ -51,6 +52,7 @@ agents:
       - specs/
 
   - name: decomposer
+    model: gpt-6-astra
     thinking: high
     color: "#34d399"
     purpose: Decompose a complete spec into verifiable tickets with real dependencies.
@@ -66,6 +68,8 @@ agents:
       - "specs/*.tickets/**"
 
   - name: builder
+    model: gpt-5.6-sol
+    thinking: high
     color: "#22d3ee"
     purpose: Implement the bound spec or ticket and report the implementation outcome.
     prompt_engineering:
@@ -75,6 +79,8 @@ agents:
     # touch defaults.protected_files — the builder does not get to edit its own grader.
 
   - name: scout
+    model: gpt-6-sol
+    thinking: high
     color: "#fbbf24"
     purpose: Find and report where things live; change nothing.
     prompt_engineering:
@@ -89,7 +95,8 @@ agents:
   # phase over adw_modules/quality.py. See SKILL.md hard rule 8.
 
   - name: reviewer
-    thinking: high
+    model: gpt-5.6-sol
+    thinking: xhigh
     color: "#fb7185"
     purpose: Confirm that what was built is what was asked for; change nothing.
     prompt_engineering:
@@ -99,6 +106,8 @@ agents:
                                    # claim the tool list only implied, now enforced
 
   - name: documenter
+    model: gpt-6-sol
+    thinking: medium
     color: "#e879f9"
     purpose: Write up the change that was just made, from the diff; document only.
     prompt_engineering:

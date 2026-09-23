@@ -1,5 +1,7 @@
 name = "sssf_recon"
 description = "Read-only SSSF investigator for bounded codebase reconnaissance."
+model = "gpt-6-luna"
+model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
 web_search = "disabled"
 developer_instructions = """
