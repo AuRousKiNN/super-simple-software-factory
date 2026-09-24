@@ -31,7 +31,11 @@ role's work itself.
 - Do not edit `adws/adw_data/sessions/`; it is an audit record.
 - Observe through `adws/adw_data/sssf.db` only when following or diagnosing a
   requested run.
-- Report phase name, owner, status, and error plainly.
+- Wait silently while an ADW is running; do not send unsolicited progress
+  updates or repeatedly inspect its trace. See [run_adw.md](cookbooks/run_adw.md).
+- If an ADW fails, stop orchestration and report the failure to the user. Do not
+  automatically repair, retry, resume, or launch a follow-up ADW.
+- In the final report, state phase name, owner, status, and error plainly.
 - Do not claim a workflow passed until `run.finish()` records acceptance.
 
 ## Request routing

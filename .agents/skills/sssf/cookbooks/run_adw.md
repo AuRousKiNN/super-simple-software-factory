@@ -23,10 +23,15 @@ pass it. Do not swap rosters on your own: model selection affects cost, context,
 and compatibility.
 
 Launch in a way that keeps the process output available, record the printed
-`adw_id`, then monitor SQLite rather than repeatedly inspecting application
-files.
+`adw_id`, then wait silently for completion using the process wait facility.
+Do not send unsolicited progress updates, repeatedly query SQLite, or inspect
+application files while the ADW runs. Answer an explicit user status request
+with a targeted read-only check, then return to waiting.
 
-## Monitor
+## Inspect status when requested or collect the final result
+
+Use these commands for an explicit status request or to collect the final
+report after completion, not as a routine polling loop:
 
 ```bash
 just sessions
@@ -52,7 +57,9 @@ requested; never edit them.
 ## Stalls and termination
 
 A quiet trace can mean the runtime is still starting or a command has stopped
-emitting events. Check the current phase and owned process identity. Termination
+emitting events. Silence alone is not a failure or a reason to interrupt the
+ADW. When the user requests diagnosis or termination, check the current phase
+and owned process identity. Termination
 must go through the workflow's normal signal path so the active turn is
 cancelled, child agents are closed, permission verification runs, and process
 rows settle. Never kill a PID without verifying its saved start marker because
@@ -61,6 +68,21 @@ PIDs can be reused.
 Timeout, interruption, authentication, model, approval, runtime, and
 unknown-outcome failures have different recovery implications. Report the exact
 kind rather than relabeling all of them as a failed envelope.
+
+## Failure: stop and report
+
+A nonzero process exit, a recorded terminal failure, or rejection by
+`run.finish(accepted=False, ...)` means the ADW failed. Stop orchestration:
+do not launch later ADWs, change code or configuration, or automatically retry,
+resume, repair, or recover artifacts. Let the runtime finish its normal cleanup,
+collect only the evidence needed for the failure report, then report to the user
+and wait for their next instruction. If no phase or `adw_id` was created, report
+the launch error and exit code instead. If acceptance cannot be verified, report
+that uncertainty rather than claiming success or launching another run.
+
+The ADW's existing bounded gate/JSON retries and fix loops remain internal to
+that run. An intermediate failed check inside such a loop is not itself a
+terminal ADW failure.
 
 ## Report
 
