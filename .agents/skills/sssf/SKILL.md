@@ -39,6 +39,34 @@ role's work itself.
 - Do not claim a workflow passed until `run.finish()` records acceptance.
 - Execution records belong to business ADWs. Do not launch a standalone documenter.
 
+## Planning target: required before launch
+
+Every workflow containing a planner requires exactly one explicit target. This
+includes all `adw_plan*` workflows, including `adw_plan_decompose`, and
+`adw_simple_sdlc`:
+
+- New specification: choose an unused readable `specs/<spec_key>` and pass
+  `--spec-dir specs/<spec_key>`; the planner writes `spec.md` inside it.
+- Revise an existing specification: pass `--spec specs/<spec_key>/spec.md`
+  in a new session.
+
+The launching agent chooses the target from the request; do not ask the user to
+name routine directories. A path mentioned in prompt prose does not replace the
+CLI argument. Decomposition inherits the planner's `spec_path` and writes
+`specs/<spec_key>/spec.tickets/`; it needs no separate output-directory argument.
+
+```bash
+uv run adws/adw_plan_decompose.py "plan and split the change" --spec-dir specs/example
+uv run adws/adw_plan_decompose.py "revise the plan and tickets" --spec specs/example/spec.md
+```
+
+For an existing installation, check the selected script's `--help` before
+launching. If target options are missing, follow the
+[specification artifact upgrade](cookbooks/install.md#upgrading-specification-artifacts).
+The installer preserves existing workflow scripts, so updating the skill or
+runtime alone does not update their CLI. Do not omit the target to work around
+an outdated script.
+
 ## Request routing
 
 | Request | Read and follow |

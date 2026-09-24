@@ -4,7 +4,9 @@
 # ///
 """ADW Plan Decompose — produce a complete spec and validated ticket set.
 
-Usage: uv run adws/adw_plan_decompose.py "request or prompt.md"
+Usage:
+    uv run adws/adw_plan_decompose.py "<prompt or path/to/prompt.md>" --spec-dir specs/example
+    uv run adws/adw_plan_decompose.py "<revision request>" --spec specs/example/spec.md
 Phases: engineer(request) -> planner -> code(input) -> decomposer -> code(index)
 """
 import argparse

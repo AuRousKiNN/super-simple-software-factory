@@ -2,6 +2,16 @@
 
 Modify an existing ADW chain — add phases, add gates, add a bounded fix loop.
 
+## Preserve the planning target
+
+For every chain containing a planner, including all `adw_plan*` scripts, keep
+`--spec-dir` and `--spec` in a required mutually exclusive CLI group. Construct
+`PlanningTarget` and pass it as `AgentCall.planning_target` to the planner.
+Keep both new-spec and revision examples in the script docstring up to date.
+For plan → decomposition, pass the returned `plan.spec_path` to
+`tickets.decompose`; never derive another target from the prompt or session ID.
+See [launch target selection](run_adw.md#choose-the-specification-target).
+
 ## Add a phase
 
 Insert a `with run.phase(...)` block where it belongs in the sequence. Pick the right `kind`: `agent` for a `ph.call(...)`, `code` for a deterministic step, `engineer` for a human touchpoint. If the new phase names an agent not already in `REQUIRED_AGENTS`, add it there too — otherwise validation passes and the run dies mid-flight instead of at startup.

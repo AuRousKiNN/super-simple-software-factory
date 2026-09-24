@@ -5,7 +5,8 @@
 """ADW Plan Build Test — the full starter chain.
 
 Usage:
-    uv run adws/adw_plan_build_test.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4]
+    uv run adws/adw_plan_build_test.py "<prompt or path/to/prompt.md>" --spec-dir specs/example [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4]
+    uv run adws/adw_plan_build_test.py "<revision request>" --spec specs/example/spec.md
 
 Phases: engineer(request) -> planner -> builder -> code(test) [-> builder(fix) -> code(test) ... bounded] -> git(commit)
 

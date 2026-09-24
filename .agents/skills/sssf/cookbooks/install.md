@@ -95,6 +95,15 @@ structured ReviewBlocker entries. Preserve local commands when moving them into
 
 Merge preserved ADWs, planner/documenter prompts and roster together. Planning
 requires `--spec-dir` or `--spec`; new specs use `specs/<spec_key>/spec.md`.
+Compare every installed `adw_plan*.py` and any other planner chain (including
+`adw_simple_sdlc.py`) with its current template. Merge the required mutually
+exclusive CLI target arguments, `PlanningTarget` construction, and
+`AgentCall.planning_target` together. For `adw_plan_decompose`, forward the
+planner's `plan.spec_path` to `tickets.decompose`; the ticket directory becomes
+`specs/<spec_key>/spec.tickets/`. Verify each merged script with `--help` before
+launch: its usage must show `(--spec-dir SPEC_DIR | --spec SPEC)`. Updating this
+skill or running the installer alone does not migrate preserved script CLIs.
+
 Documenter writes are `[]` (only current reports and handoff exceptions); its
 output is `DocumentDraftOutput`. Business ADWs collect `DocumentRequest`, publish
 through `spec_artifacts.document`, and optionally prepare post-finish projection.
