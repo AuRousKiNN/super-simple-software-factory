@@ -37,6 +37,7 @@ role's work itself.
   automatically repair, retry, resume, or launch a follow-up ADW.
 - In the final report, state phase name, owner, status, and error plainly.
 - Do not claim a workflow passed until `run.finish()` records acceptance.
+- Execution records belong to business ADWs. Do not launch a standalone documenter.
 
 ## Request routing
 
@@ -86,22 +87,6 @@ Deep references: [configuration](references/config.md),
 14. The active distribution has one runtime and schema version 2. Do not add a
     fallback backend, historical session importer, or silent compatibility
     path.
-
-
-## Specification identity at launch
-
-Before planning, determine whether the request starts a new spec or continues an
-existing one. Choose a readable, unused `specs/<spec_key>` directory yourself;
-the user need not name it. Pass `--spec-dir specs/<spec_key>` for new planning or
-`--spec specs/<spec_key>/spec.md` for revision. These are mutually exclusive and
-required. Never infer identity from the latest diff or silently rename conflicts.
-Existing spec/ticket execution keeps the root spec identity. Use a new session
-when revising a definition already bound for implementation.
-
-Execution records belong to business ADWs. Do not launch a standalone documenter.
-The documenter writes two invocation drafts; the host publishes the spec README,
-immutable execution history and `specs/README.md`. See
-[execution artifacts](references/spec-artifacts.md) for recovery and acceptance.
 
 ## Runtime version
 
