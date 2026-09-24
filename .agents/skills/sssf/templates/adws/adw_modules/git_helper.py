@@ -113,3 +113,14 @@ def diff_counts(base: str) -> tuple[int, int]:
 
 def diff_text(base: str) -> str:
     return _git("diff", base)
+
+
+def commit_paths(message: str, paths: list[str]) -> str:
+    """Commit only supplied changed paths, preserving unrelated staged changes."""
+    changed = [path for path in dict.fromkeys(paths)
+               if _git("status", "--porcelain", "--", path)]
+    if not changed:
+        return rev("HEAD")
+    _git("add", "-A", "--", *changed)
+    _git("commit", "--only", "-m", message, "--", *changed)
+    return rev("HEAD")

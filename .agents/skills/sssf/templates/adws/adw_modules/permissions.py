@@ -63,6 +63,7 @@ def _glob(pattern: str) -> re.Pattern:
 
 INDEX_PATH = "@git-index"
 HOST_SESSION_FILES = (
+    "spec-binding.json", "spec-artifacts/*.json", "spec-finish.json", "spec-acceptance/*.json", "ticket-facts.json",
     "work_item.json", "decomposition.json", "decomposition-published.json", "ticket-acceptance.json", "review-routing/*.json",
 )
 
@@ -285,10 +286,11 @@ def _host_patterns(run) -> list[str]:
 
 
 def _extra_patterns(run) -> list[str]:
-    patterns = _host_patterns(run)
+    from .spec_artifacts import HOST_PATHS
+    patterns = _host_patterns(run) + HOST_PATHS
     scope = getattr(run, "active_write_scope", None)
     if scope:
-        patterns.append(scope + "**/*")
+        patterns.append(scope + "**/*" if scope.endswith("/") else scope)
     return patterns
 
 
@@ -309,6 +311,9 @@ def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig, run=None) -> bool:
     if path == INDEX_PATH:
         return False
     normalized = _normalize_repo_path(path)
+    from .spec_artifacts import HOST_PATHS
+    if any(_matches(normalized, pattern) for pattern in HOST_PATHS):
+        return False
     if run is not None and (normalized in getattr(run, "active_readonly_paths", [])
                             or any(_matches(normalized, p) for p in _host_patterns(run))):
         return False
@@ -319,6 +324,8 @@ def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig, run=None) -> bool:
         return False
     if scope and normalized == scope + "index.json":
         return False
+    if scope and agent.name in {"planner", "documenter", "decomposer"}:
+        return True
     if any(_matches(normalized, item) for item in (agent.writes or [])):
         return True
     if any(_matches(normalized, item) for item in cfg.defaults.protected_files):

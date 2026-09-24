@@ -42,22 +42,21 @@ pinned before the first commit phase and printed in the request phase.
 
 import argparse
 import sys
+from pathlib import Path
 
-from adw_modules import agents, changes, gates, git_helper, quality, review_routing, session, tickets, utils
+from adw_modules import agents, changes, gates, git_helper, quality, review_routing, session, spec_artifacts, tickets, utils
+from adw_modules.data_types import PlanningTarget
 from adw_modules.data_types import (AgentCall, BuildOutput, ChangeCapture,
-                                    DocumentOutput, PhaseParams, PlanOutput,
+                                    DocumentRequest, FinishOptions, PhaseParams, PlanOutput,
                                     ReviewOutput)
 
 REQUIRED_AGENTS = ["planner", "builder", "reviewer", "documenter"]
 MAX_REVISION_LOOPS = 3
 MAX_VERIFICATION_LOOPS = 2
 
-DOCUMENT_NOTES = ("Read diff_path in full before writing. Document only what the "
-                  "diff shows, then copy the write-up into app_docs/ as your task "
-                  "describes.")
 
-
-def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw_id: str | None = None) -> int:
+def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw_id: str | None = None, target: PlanningTarget | None = None) -> int:
+    target = target or PlanningTarget()
     cfg = agents.load_config(config)
     agents.validate(cfg, REQUIRED_AGENTS)
     run = session.ensure(cfg, adw_id)
@@ -66,7 +65,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
     def commit(ph, envelope) -> str:
         """Commit what the preceding phase produced, in that agent's own words."""
         message = envelope.commit_message or f"sssf({run.adw_id}): {envelope.summary}"
-        sha = git_helper.commit_all(message)
+        sha = git_helper.commit_paths(message, envelope.artifacts if hasattr(envelope, "spec_path") else git_helper.diff_files(build_base) + git_helper.untracked_files())
         ph.log(sha=sha, message=message)
         return sha
 
@@ -78,10 +77,6 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                files=len(changeset.files) + len(changeset.untracked),
                lines=f"+{changeset.insertions} -{changeset.deletions}",
                diff=changeset.diff_path)
-        if changeset.empty:
-            raise RuntimeError(
-                f"nothing changed since {changeset.base.label} "
-                f"({changeset.base.reason})")
         return changes.as_envelope(changeset, notes)
 
     def record(ph, result) -> None:
@@ -96,12 +91,13 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
 
     with run.phase(PhaseParams(name="plan", kind="agent", owner="planner",
                                description="Turn the request into an implementable plan")) as ph:
-        plan = ph.call(AgentCall(output_type=PlanOutput, prompt=prompt,
+        plan = ph.call(AgentCall(output_type=PlanOutput, prompt=prompt, planning_target=target,
                                  gates=[gates.artifacts_exist, gates.files_non_empty]))
 
     with run.phase(PhaseParams(name="commit_plan", kind="code", owner="git",
                                description="Put the spec on record before any code exists to blur it")) as ph:
-        build_base = commit(ph, plan)
+        build_base = git_helper.commit_paths(plan.commit_message or "记录规格规划", [plan.spec_path, str(Path(plan.spec_path).parent / "README.md"), "specs/README.md"])
+        ph.log(sha=build_base)
 
     with run.phase(PhaseParams(name="spec_input", kind="code", owner="tickets",
                                description="Bind the current root spec for implementation and all repairs")) as ph:
@@ -147,9 +143,7 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
             receipt = review_routing.save(run, review, decision,
                 review_routing.ReceiptContext(prompt, build_base, work_item, sorted({"test", *results})))
             ph.log(receipt=str(receipt), **decision.model_dump())
-        if decision.action == "handoff":
-            return run.finish(accepted=False, reason=decision.reason)
-        if decision.action == "approve":
+        if decision.action in {"handoff", "approve"}:
             break
         if decision.action == "repair":
             repairs += 1
@@ -169,25 +163,25 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
                 results.update({c.name: c for c in result.checks})
                 record(ph, result)
 
-    with run.phase(PhaseParams(name="commit_build", kind="code", owner="git",
-                               description="Land the code only now: green suite, approved review")) as ph:
-        commit(ph, build)
+    if decision.action == "approve":
+        with run.phase(PhaseParams(name="commit_build", kind="code", owner="git",
+                                   description="Commit the reviewed implementation and its completed verification")) as ph:
+            commit(ph, build)
 
     with run.phase(PhaseParams(name="changes", kind="code", owner="git",
-                               description="Diff the whole run against its pinned baseline, for the documenter")) as ph:
-        document_input = capture_changes(ph, baseline, DOCUMENT_NOTES)
-
-    with run.phase(PhaseParams(name="document", kind="agent", owner="documenter", retries=1,
-                               description="Write up the completed change")) as ph:
-        document = ph.call(AgentCall(output_type=DocumentOutput, prompt=prompt,
-                                     previous=document_input,
-                                     gates=[gates.artifacts_exist, gates.files_non_empty]))
-
+                               description="Capture actual changes and current review evidence for execution history")) as ph:
+        document_input = capture_changes(ph, baseline, decision.reason)
+    document = spec_artifacts.document(run, DocumentRequest(work_item=work_item,
+        purpose="记录本次实施、验证与阻塞，并更新累计现状。" + decision.reason,
+        changes=document_input, checks=list(results.values()), review=review,
+        review_receipt=tickets.artifact(run.repo_root, spec_artifacts.relative(run, receipt), ".json")))
     with run.phase(PhaseParams(name="commit_docs", kind="code", owner="git",
-                               description="Ship the write-up in its own commit, beside the code it describes")) as ph:
-        commit(ph, document)
-
-    return run.finish(accepted=True, reason="review and current mandatory checks passed")
+                               description="Commit only published execution artifacts, preserving unrelated edits")) as ph:
+        ph.log(sha=git_helper.commit_paths(document.commit_message or "记录规格执行现状", document.artifacts))
+        spec_artifacts.prepare_finish(run, document, FinishOptions(
+            receipt=tickets.artifact(run.repo_root, spec_artifacts.relative(run, receipt), ".json"),
+            accepts_scope=True, commit=True))
+    return run.finish(accepted=decision.action == "approve", reason=decision.reason)
 
 
 if __name__ == "__main__":
@@ -195,5 +189,8 @@ if __name__ == "__main__":
     parser.add_argument("prompt", help="inline text or a path to a prompt file")
     parser.add_argument("--config", default="adws/adw_sssf_config/sssf.config.yaml")
     parser.add_argument("--adw-id", default=None, help="join or pin an existing session")
+    goal = parser.add_mutually_exclusive_group(required=True)
+    goal.add_argument("--spec-dir", help="new specs/<spec_key> directory chosen by the launching agent")
+    goal.add_argument("--spec", help="existing specs/<spec_key>/spec.md to revise")
     args = parser.parse_args()
-    sys.exit(main(utils.resolve_prompt(args.prompt), args.config, args.adw_id))
+    sys.exit(main(utils.resolve_prompt(args.prompt), args.config, args.adw_id, PlanningTarget(spec_dir=args.spec_dir, spec=args.spec)))

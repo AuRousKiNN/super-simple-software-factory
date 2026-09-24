@@ -314,11 +314,31 @@ def bind_work_item(run, call, role: str = "builder"):
         protected = validate_work_item(run, item, check_tree=not saved.exists())
         if not saved.exists():
             atomic_json(saved, item.model_dump())
+        if item.spec.path.startswith("specs/") and item.spec.path.endswith("/spec.md") and role in {"builder", "reviewer"}:
+            from . import spec_artifacts
+            spec_artifacts.mark_unsynced(run, item)
         return item, protected
     return None, []
 
 
 def record_acceptance(run, record: AcceptanceRecord) -> ArtifactRef:
+    item = TicketWorkItem.model_validate_json((run.session_dir / "work_item.json").read_text())
+    if not (item.spec.path.startswith("specs/") and item.spec.path.endswith("/spec.md")):
+        return _record_acceptance(run, record)
+    from . import permissions, spec_artifacts
+    previous = getattr(run, "workspace_lock", None)
+    lock = permissions.acquire_workspace_lock(run.repo_root)
+    run.workspace_lock = lock
+    try:
+        receipt = _record_acceptance(run, record)
+        spec_artifacts.ticket_accepted(run, item, receipt)
+        return receipt
+    finally:
+        lock.release()
+        run.workspace_lock = previous
+
+
+def _record_acceptance(run, record: AcceptanceRecord) -> ArtifactRef:
     """Call after run.finish accepted the ADW's checks/review/manual obligations."""
     if getattr(run, "accepted", False) is not True or record.adw_id != run.adw_id:
         raise TicketError("only a finished, accepted host run may publish ticket evidence")

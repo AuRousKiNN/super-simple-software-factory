@@ -431,7 +431,7 @@ class _PhaseHandle:
             )
         if self.params.owner == "documenter":
             return DocumentOutput(
-                status="success", summary="documented", document_path="app_docs/x.md",
+                status="success", summary="documented", spec_path="spec.md", overview_path="README.md", document_path="document.md",
                 documented_files=["src.py"], artifacts=["document.md", "app_docs/x.md"],
                 commit_message="补充文档",
             )
@@ -490,7 +490,17 @@ def test_complete_sdlc_chain_reaches_documentation(monkeypatch, tmp_path) -> Non
 
     monkeypatch.setattr(adw_simple_sdlc.review_routing, "refresh_results", lambda _run, results: results)
     monkeypatch.setattr(adw_simple_sdlc.review_routing, "save", lambda *_args: tmp_path / "receipt.json")
-    assert adw_simple_sdlc.main("build it") == 0
+    from adw_modules.data_types import AgentCall, PlanningTarget, PhaseParams
+    (tmp_path / "receipt.json").write_text("{}")
+    monkeypatch.setattr(adw_simple_sdlc.git_helper, "commit_paths", lambda *_: "b" * 40)
+    monkeypatch.setattr(adw_simple_sdlc.git_helper, "diff_files", lambda *_: ["src.py"])
+    monkeypatch.setattr(adw_simple_sdlc.git_helper, "untracked_files", lambda: [])
+    def document(_run, request):
+        with _run.phase(PhaseParams(name="document", kind="agent", owner="documenter", description="Explain captured execution evidence")) as ph:
+            return ph.call(AgentCall(output_type=DocumentOutput, prompt=request.purpose))
+    monkeypatch.setattr(adw_simple_sdlc.spec_artifacts, "document", document)
+    monkeypatch.setattr(adw_simple_sdlc.spec_artifacts, "prepare_finish", lambda *_args, **_kw: None)
+    assert adw_simple_sdlc.main("build it", target=PlanningTarget(spec_dir="specs/example")) == 0
     assert [phase.name for phase in run.phases] == [
         "request", "plan", "commit_plan", "spec_input", "build", "test_1",
         "changes_review_1", "review_1", "route_1", "commit_build", "changes", "document",

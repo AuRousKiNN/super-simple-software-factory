@@ -43,6 +43,13 @@ class GateFailure(RuntimeError):
     pass
 
 
+class AgentReportedFailure(RuntimeError):
+    """A valid failed envelope, distinct from runtime and permission failures."""
+    def __init__(self, role, envelope):
+        super().__init__(f"{role} reported status='fail': {envelope.summary}")
+        self.envelope = envelope
+
+
 class AgentRuntimeFailure(RuntimeError):
     pass
 
@@ -193,8 +200,19 @@ def _subagent_role_problems(agent: AgentConfig) -> list[str]:
 def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     """Clear per-call policy even when preflight or prompt rendering fails."""
     try:
-        return _execute(run, phase, call)
+        output = _execute(run, phase, call)
+        if phase.params.owner == "planner":
+            from . import spec_artifacts
+            spec_artifacts.publish_plan(run, output)
+        return output
+    except AgentReportedFailure as error:
+        if phase.params.owner == "planner":
+            from . import spec_artifacts
+            if spec_artifacts.plan_gate(error.envelope, run).passed:
+                spec_artifacts.publish_plan(run, error.envelope)
+        raise
     finally:
+        run.active_document_context = None
         run.active_report_dir = None
         run.active_readonly_paths = []
         run.active_write_scope = None
@@ -203,7 +221,18 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
 
 def _execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     """Render prompts, run bounded Codex turns, validate gates, return envelope."""
+    from . import spec_artifacts
+    from .data_types import DocumentDraftOutput, PlanOutput
     agent = resolve(run.cfg, phase.params.owner)
+    spec_path = None
+    if agent.name == "planner":
+        if call.planning_target is None or call.output_type is not PlanOutput:
+            raise ValueError("planner requires PlanningTarget and PlanOutput")
+        spec_path = spec_artifacts.bind_plan(run, call.planning_target)
+    if agent.name == "documenter":
+        if call.document_context is None or call.output_type is not DocumentDraftOutput:
+            raise ValueError("documenter requires bound DocumentContext and DocumentDraftOutput")
+        spec_artifacts.validate_context(run, call.document_context)
     # Bind before rendering or resuming any runtime thread.
     item, protected = tickets.bind_work_item(run, call, agent.name)
     if agent.name == "decomposer":
@@ -219,17 +248,31 @@ def _execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     run.active_readonly_paths = protected + ([call.decomposition.spec.path] if call.decomposition else [])
     run.active_decomposition = call.decomposition
     run.active_write_scope = call.decomposition.output_dir + "/" if call.decomposition else None
+    if spec_path:
+        run.active_write_scope = spec_path
+        call.gates.append(spec_artifacts.plan_gate)
+    if agent.name == "documenter":
+        run.active_write_scope = call.document_context.invocation_dir + "/reports/"
+        run.active_document_context = call.document_context
+        run.active_readonly_paths += [ref.path for ref in [call.document_context.overview, *spec_artifacts._refs(call.document_context)]]
+        call.gates.append(spec_artifacts.draft_gate)
     agent_dir = run.session_dir / agent.name
     agent_dir.mkdir(parents=True, exist_ok=True)
     invocation_id = f"inv_{new_id(12)}"
     invocation_dir = agent_dir / "invocations" / invocation_id
-    invocation_dir.mkdir(parents=True, exist_ok=False)
+    if call.document_context:
+        invocation_dir = spec_artifacts._path(run, call.document_context.invocation_dir)
+        invocation_id = invocation_dir.name
+    else:
+        invocation_dir.mkdir(parents=True, exist_ok=False)
     report_dir = invocation_dir / "reports"
-    report_dir.mkdir()
+    report_dir.mkdir(exist_ok=bool(call.document_context))
     run.active_report_dir = report_dir
 
     variables = {
         "prompt": call.prompt,
+        "spec_path": spec_path or "(none)",
+        "document_context": call.document_context.model_dump_json(indent=2) if call.document_context else "(none)",
         "work_item": item.model_dump_json(indent=2) if item else "(none; use the direct request)",
         "decomposition": call.decomposition.model_dump_json(indent=2) if call.decomposition else "(none)",
         "previous_envelope": (
@@ -459,7 +502,7 @@ def _execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
 
         if envelope.status == "fail":
             _persist_envelope(run, phase, agent.name, call, envelope, attempt, valid=True)
-            raise RuntimeError(f"{agent.name} reported status='fail': {envelope.summary}")
+            raise AgentReportedFailure(agent.name, envelope)
 
         for gate_attempt in range(1, max(1, phase.params.retries + 1) + 1):
             violations = []
@@ -502,7 +545,7 @@ def _execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
             envelope, attempt = _parse_with_retries(run, phase, call, result, send)
             if envelope.status == "fail":
                 _persist_envelope(run, phase, agent.name, call, envelope, attempt, valid=True)
-                raise RuntimeError(f"{agent.name} reported status='fail': {envelope.summary}")
+                raise AgentReportedFailure(agent.name, envelope)
 
         check_permissions(log_paths=True)
 

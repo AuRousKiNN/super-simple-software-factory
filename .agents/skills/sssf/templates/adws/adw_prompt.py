@@ -19,6 +19,8 @@ from adw_modules.data_types import AgentCall, BUILTIN_OUTPUT_TYPES, GenericOutpu
 
 def main(prompt: str, agent: str = "builder",
          config: str = "adws/adw_sssf_config/sssf.config.yaml", adw_id: str | None = None) -> int:
+    if agent in {"planner", "documenter"}:
+        raise ValueError("planner requires adw_plan --spec-dir/--spec; documenter requires a bound business workflow stage")
     cfg = agents.load_config(config)
     agents.validate(cfg, [agent])
     run = session.ensure(cfg, adw_id)

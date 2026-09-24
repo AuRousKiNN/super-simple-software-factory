@@ -20,7 +20,7 @@ from pathlib import Path
 
 OUTPUT_TYPES = {"planner": "PlanOutput", "decomposer": "DecomposeOutput", "builder": "BuildOutput",
                 "scout": "ScoutOutput",
-                "reviewer": "ReviewOutput", "documenter": "DocumentOutput"}
+                "reviewer": "ReviewOutput", "documenter": "DocumentDraftOutput"}
 
 HEADER = '''#!/usr/bin/env -S uv run
 # /// script
@@ -37,16 +37,18 @@ Phases: engineer(request) -> {chain}
 import argparse
 import sys
 
-from adw_modules import agents, changes, gates, git_helper, review_routing, session, tickets, utils
-from adw_modules.data_types import AgentCall, ChangeCapture, PhaseParams, TicketSelection, {imports}
+from adw_modules import agents, changes, gates, git_helper, review_routing, session, spec_artifacts, tickets, utils
+from adw_modules.data_types import AgentCall, ChangeCapture, DocumentRequest, PhaseParams, PlanningTarget, TicketSelection, WorkflowOptions, {imports}
 
 REQUIRED_AGENTS = {agents_list}
 
 
-def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw_id: str | None = None, selection: TicketSelection | None = None) -> int:
-    cfg = agents.load_config(config)
+def main(prompt: str, options: WorkflowOptions | None = None) -> int:
+    options = options or WorkflowOptions()
+{target_preflight}
+    cfg = agents.load_config(options.config)
     agents.validate(cfg, REQUIRED_AGENTS)
-    run = session.ensure(cfg, adw_id)
+    run = session.ensure(cfg, options.adw_id)
 {build_base}
 
     with run.phase(PhaseParams(name="request", kind="engineer", owner=run.engineer,
@@ -54,8 +56,11 @@ def main(prompt: str, config: str = "adws/adw_sssf_config/sssf.config.yaml", adw
         ph.log(input=prompt)
 
     previous = None
-    source_spec = prompt
-    work_item = None
+    source_spec = options.spec or prompt
+    work_item = tickets.spec_work_item(run.repo_root, options.spec) if options.spec else None
+    selection = options.selection
+    last_review = None
+    last_receipt = None
     accepted = True
 {phases}
     return run.finish(accepted=accepted, reason="a generated review did not approve the selected target")
@@ -68,16 +73,24 @@ if __name__ == "__main__":
     parser.add_argument("--adw-id", default=None, help="join or pin an existing session")
     parser.add_argument("--ticket-id", help="explicit ticket selected after decomposition")
     parser.add_argument("--dependency-evidence")
+    goal = parser.add_mutually_exclusive_group(required={target_required})
+    goal.add_argument("--spec-dir")
+    goal.add_argument("--spec")
     args = parser.parse_args()
     selection = TicketSelection(ticket_id=args.ticket_id, dependency_evidence=args.dependency_evidence) if args.ticket_id else None
-    sys.exit(main({prompt_expression}, args.config, args.adw_id, selection))
+    target = PlanningTarget(spec_dir=args.spec_dir, spec=args.spec) if {has_planner} else None
+    if not {has_planner} and args.spec_dir:
+        parser.error("--spec-dir requires a planner phase")
+    options = WorkflowOptions(config=args.config, adw_id=args.adw_id, planning_target=target,
+                              spec=None if {has_planner} else args.spec, selection=selection)
+    sys.exit(main({prompt_expression}, options))
 '''
 
 PHASE = '''    # TODO: replace this description — say what THIS phase does and why.
     with run.phase(PhaseParams(name="{name}", kind="agent", owner="{agent}",
                                retries=1, description="Run {agent} over the request and hand its envelope on")) as ph:
         previous = ph.call(AgentCall(output_type={output_type}, prompt=prompt,
-                                     previous=previous, work_item=work_item,
+                                     previous=previous, work_item=work_item{planning},
                                      gates=[gates.artifacts_exist{review_gate}]))
 '''
 
@@ -87,8 +100,6 @@ CHANGES_PHASE = '''    with run.phase(PhaseParams(name="{name}", kind="code", ow
         ph.log(files=len(changeset.files) + len(changeset.untracked),
                lines=f"+{{changeset.insertions}} -{{changeset.deletions}}",
                diff=changeset.diff_path)
-        if changeset.empty:
-            raise RuntimeError("builder produced no changes")
         previous = changes.as_envelope(changeset, "Git-captured builder changes")
 '''
 
@@ -105,6 +116,8 @@ def main() -> int:
         print("no agents given")
         return 1
 
+    if agent_names == ["documenter"]:
+        parser.error("documenter is a stage of a business workflow, not a standalone workflow")
     types = [OUTPUT_TYPES.get(a, "GenericOutput") for a in agent_names]
     seen: dict[str, int] = {}
     phases = []
@@ -117,16 +130,41 @@ def main() -> int:
                 phases.append('    with run.phase(PhaseParams(name="select_ticket", kind="code", owner="tickets", description="Validate explicit ticket selection and prerequisite evidence")) as ph:\n'
                               '        work_item = tickets.select_ticket(run, previous, selection)\n'
                               '        ph.log(work_item=work_item.model_dump())\n')
+            elif "documenter" in agent_names[position + 1:]:
+                phases.append('    work_item = tickets.spec_work_item(run.repo_root, source_spec)\n')
+        elif agent == "documenter":
+            phases.append(f'''    if work_item is None:
+        raise ValueError("documenter requires an explicit root spec or selected ticket")
+    document_changes = changes.as_envelope(changes.capture(run, ChangeCapture(base=build_base)), "Actual execution changes")
+    previous = spec_artifacts.document(run, DocumentRequest(work_item=work_item,
+        purpose=prompt, changes=document_changes, review=last_review,
+        review_receipt=tickets.artifact(run.repo_root, spec_artifacts.relative(run, last_receipt), ".json") if last_receipt else None), name="{phase_name}")
+    spec_artifacts.prepare_finish(run, previous)
+''')
         else:
             phases.append(PHASE.format(name=phase_name, agent=agent, output_type=output_type,
+                                       planning=", planning_target=options.planning_target" if agent == "planner" else "",
                                        review_gate=", gates.verdict_consistent" if agent == "reviewer" else ""))
         if agent == "reviewer":
+            blocked_document = ""
+            if "documenter" in agent_names[position + 1:]:
+                blocked_document = """    if decision.action != "approve":
+        if work_item is None:
+            raise ValueError("blocked documentation requires an explicit spec")
+        document = spec_artifacts.document(run, DocumentRequest(work_item=work_item,
+            purpose=decision.reason, review=previous,
+            changes=changes.as_envelope(changes.capture(run, ChangeCapture(base=build_base)), decision.reason),
+            review_receipt=tickets.artifact(run.repo_root, spec_artifacts.relative(run, receipt), ".json")))
+        spec_artifacts.prepare_finish(run, document)"""
             phases.append(f'''    with run.phase(PhaseParams(name="route_{phase_name}", kind="code", owner="review_routing",
                                description="Persist review ownership and stop unapproved one-shot delivery")) as ph:
         decision = review_routing.decide(previous, review_routing.RoutingPolicy())
         receipt = review_routing.save(run, previous, decision,
             review_routing.ReceiptContext(prompt, build_base, work_item))
         ph.log(receipt=str(receipt), **decision.model_dump())
+    last_review, last_receipt = previous, receipt
+    accepted = accepted and decision.action == "approve"
+{blocked_document}
     if decision.action != "approve":
         return run.finish(accepted=False, reason=decision.reason)
 ''')
@@ -151,8 +189,12 @@ def main() -> int:
         prompt_expression=("args.prompt" if "decomposer" in agent_names and "planner" not in agent_names[:agent_names.index("decomposer")] else "utils.resolve_prompt(args.prompt)"),
         agents_list=repr(sorted(set(agent_names))),
         build_base=('    build_base = git_helper.rev("HEAD")'
-                    if "builder" in agent_names or "reviewer" in agent_names else ""),
+                    if any(a in agent_names for a in ("builder", "reviewer", "documenter")) else ""),
         phases="\n".join(phases),
+        target_preflight=('    if options.planning_target is None:\n        raise ValueError("planner requires --spec-dir or --spec")' if "planner" in agent_names else
+                          '    if options.spec is None:\n        raise ValueError("documenter requires --spec")' if "documenter" in agent_names and "decomposer" not in agent_names else ""),
+        target_required=repr("planner" in agent_names or ("documenter" in agent_names and "decomposer" not in agent_names)),
+        has_planner=repr("planner" in agent_names),
     )
 
     dest = Path.cwd() / "adws" / f"adw_{args.name}.py"

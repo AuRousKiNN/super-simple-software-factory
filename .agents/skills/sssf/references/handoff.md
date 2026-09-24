@@ -63,3 +63,9 @@ whose side effects cannot be determined becomes `outcome_unknown` and requires
 explicit recovery before another mutating turn.
 
 Ticket/spec work items and DecomposeOutput follow the [ticket contract](tickets.md).
+
+Execution documentation has an explicit `AgentCall.document_context` in addition
+to envelopes. `DocumentDraftOutput` lists only existing invocation report bodies;
+`spec_artifacts.publish` produces formal `DocumentOutput`. Host-generated
+`context_handoff/document.md` and `overview.md` are copies of the published
+observation. See [specification artifacts](spec-artifacts.md).

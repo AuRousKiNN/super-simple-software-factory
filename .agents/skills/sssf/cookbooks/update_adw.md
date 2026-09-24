@@ -36,9 +36,10 @@ Delete the block, drop any now-unused agent from `REQUIRED_AGENTS`, and re-threa
 Gates are callables over the finished envelope — `gate(envelope, run) -> GateReport`, recording one `check(item, ok, note)` per thing they looked at, with violations derived from the failed ones. Compose them per call:
 
 ```python
-        document = ph.call(AgentCall(output_type=DocumentOutput, prompt=prompt,
-                                     previous=changes,
-                                     gates=[gates.artifacts_exist, gates.files_non_empty]))
+    document = spec_artifacts.document(run, DocumentRequest(
+        work_item=work_item, purpose="Explain this execution", changes=changes_output,
+        checks=list(results.values()), review=review, evidence=[review_receipt_ref]))
+    spec_artifacts.prepare_finish(run, document)
 ```
 
 On violations the runtime does **not** restart the agent. It sends the violation list as a new turn on the **same Codex thread**, bounded by that phase's `retries`. Every gate result is traced to the `gate_results` table. Exhausting the retries raises `GateFailure` and fails the phase.

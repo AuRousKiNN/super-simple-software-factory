@@ -6,11 +6,9 @@ capture writes the full diff into `context_handoff/` and returns a ChangeSet;
 `as_envelope` adapts that into the one door every agent handoff uses.
 
 The base is resolved, not assumed. Off the base branch the diff covers the
-whole branch plus the working tree; on it, the uncommitted tree; and on a clean
-tree, the last commit — because "document the work that was just done" still
-has an answer right after a chain committed. Whichever it picked rides along in
-`BaseRef.reason`, so the trace never leaves you guessing what a diff was
-measured against.
+whole branch plus the working tree; on it, only the uncommitted tree. A clean
+baseline produces an empty diff: evidence-only execution must not replay the
+previous commit as a new implementation change. The reason travels with the base.
 """
 
 from __future__ import annotations
@@ -40,12 +38,8 @@ def resolve_base(ref: str) -> BaseRef:
                        f"plus the working tree")
     elif git_helper.is_dirty():
         base.reason = f"HEAD is on {base.label} — diffing the uncommitted working tree"
-    elif git_helper.ref_exists("HEAD~1"):
-        base.commit = git_helper.rev("HEAD~1")
-        base.reason = (f"HEAD is on {base.label} with a clean tree — falling back to "
-                       f"the last commit")
     else:
-        base.reason = f"HEAD is on {base.label} with a clean tree and no parent commit"
+        base.reason = f"HEAD is on {base.label} with a clean tree — no implementation changes"
     return base
 
 

@@ -90,3 +90,16 @@ prompts/report examples, review ADWs and `quality.py` check registry with the
 managed ReviewOutput/gates/routing modules. String blockers are replaced by
 structured ReviewBlocker entries. Preserve local commands when moving them into
 `quality.check_specs()`. See [routing migration](../references/reviewer-routing.md#existing-installations).
+
+## Upgrading specification artifacts
+
+Merge preserved ADWs, planner/documenter prompts and roster together. Planning
+requires `--spec-dir` or `--spec`; new specs use `specs/<spec_key>/spec.md`.
+Documenter writes are `[]` (only current reports and handoff exceptions); its
+output is `DocumentDraftOutput`. Business ADWs collect `DocumentRequest`, publish
+through `spec_artifacts.document`, and optionally prepare post-finish projection.
+The installer retires `adw_document.py` with a rollback snapshot; remove custom
+calls to that standalone workflow. Existing user-owned ADWs are not overwritten.
+Do not use a flat old spec as a new-layout publication target: explicitly migrate
+its spec/ticket paths and verify references before starting a new session.
+See [spec artifact contract](../references/spec-artifacts.md).

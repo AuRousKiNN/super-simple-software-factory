@@ -16,7 +16,7 @@ Answer four questions, in order:
 | `builder` | code must change | `BuildOutput` | none; capture the result with a code phase |
 | `reviewer` | the change must be confirmed to BE what was asked for | `ReviewOutput` | `artifacts_exist`, `verdict_consistent` |
 | *(no tester)* | verifying that it RUNS is a `kind="code"` phase over `quality.py`, not an agent | `QualityResult` → `as_envelope` | the exit code is the check |
-| `documenter` | finished work needs a write-up (runs after a build, off the diff) | `DocumentOutput` | `artifacts_exist`, `files_non_empty` |
+| `documenter` | record bound execution evidence and update cumulative progress | `DocumentDraftOutput` → host `DocumentOutput` | `spec_artifacts.draft_gate` |
 | any agent, generic ask | one-off prompt, no special shape | `GenericOutput` | as needed |
 
    A new kind of agent needs a config entry + prompt pair + output type first — see `update_config.md`.
@@ -131,3 +131,12 @@ and an explicit `--ticket-id` option for decomposer → builder chains.
 Pass the same work_item to all builder repairs and reviews; keep latest feedback
 in previous. Generated skeletons honor review.approved in run.finish but do not
 publish dependency acceptance without the ADW's actual checks and obligations.
+
+Planning phases require `AgentCall.planning_target`, supplied via mutually exclusive
+`--spec-dir`/`--spec` CLI arguments. Generated workflows use `WorkflowOptions` to
+carry planning or existing-spec bindings and optional ticket selection. A chain
+with documenter must have a root spec before dispatch. Use `spec_artifacts.document`
+for input collection, draft generation and publication; never call it with only
+`previous`. Host-published documents are committed using `commit_paths`, with
+post-finish fact synchronization handled separately. Generated review rejection
+can record controlled blockers, but never accepts the complete spec implicitly.

@@ -44,15 +44,15 @@ prompt *ARGS:
 scout *ARGS:
     uv run adws/adw_scout.py --config {{config}} "$@"
 
-# plan only: just plan "add a /health endpoint"
+# plan only: just plan "add a /health endpoint" --spec-dir specs/health-endpoint
 plan *ARGS:
     uv run adws/adw_plan.py --config {{config}} "$@"
 
-# decompose an archived spec: just decompose --spec specs/example.md
+# decompose an archived spec: just decompose --spec specs/example/spec.md
 decompose *ARGS:
     uv run adws/adw_decompose.py --config {{config}} "$@"
 
-# request to root spec and validated tickets: just plan-decompose "add export"
+# request to root spec and validated tickets: just plan-decompose "add export" --spec-dir specs/export
 plan-decompose *ARGS:
     uv run adws/adw_plan_decompose.py --config {{config}} "$@"
 
@@ -60,15 +60,15 @@ plan-decompose *ARGS:
 build *ARGS:
     uv run adws/adw_build.py --config {{config}} "$@"
 
-# planner, builder, commit: just plan-build "add a /health endpoint"
+# planner, builder, commit: just plan-build "add a /health endpoint" --spec-dir specs/health-endpoint
 plan-build *ARGS:
     uv run adws/adw_plan_build.py --config {{config}} "$@"
 
-# plan, build, test, commit: just sdlc "add a /health endpoint"
+# plan, build, test, commit: just sdlc "add a /health endpoint" --spec-dir specs/health-endpoint
 sdlc *ARGS:
     uv run adws/adw_plan_build_test.py --config {{config}} "$@"
 
-# the full chain, plus review and docs: just simple-sdlc "add a /health endpoint"
+# the full chain, plus review and docs: just simple-sdlc "add a /health endpoint" --spec-dir specs/health-endpoint
 simple-sdlc *ARGS:
     uv run adws/adw_simple_sdlc.py --config {{config}} "$@"
 

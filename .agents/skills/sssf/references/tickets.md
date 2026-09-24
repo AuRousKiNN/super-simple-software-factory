@@ -6,7 +6,7 @@ IDs provide stable references. Decomposer owns ticket boundaries and dependencie
 
 ## Artifacts and validation
 
-A source `specs/example.md` has its current planning files at `specs/example.tickets/`:
+A source `specs/example/spec.md` has its current planning files at `specs/example/spec.tickets/`:
 `ticket-set.md`, `tickets/TICKET-*.md`, and a host-derived `index.json`.
 The set frontmatter contains schema_version=1, revision, source_spec and tickets.
 Each ticket contains schema_version=1, id, revision, kind, profile, blocked_by and

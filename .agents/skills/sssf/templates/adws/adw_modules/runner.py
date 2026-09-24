@@ -207,8 +207,15 @@ class Run:
             self.console.note(f"not accepted: {note}")
         try:
             self.tracer.session_finish(self.adw_id, ok=ok)
-            self.console.session_finished(ok, self.tokens, self.cost,
-                                          self.cfg.observability.db)
-            return 0 if ok else 1
+            from . import spec_artifacts
+            spec_artifacts.record_finish(self, ok)
         finally:
             self.close()
+        try:
+            spec_artifacts.sync_finished(self)
+        except Exception as error:
+            self.console.note(f"运行结果已保存，但文档同步失败：{error}")
+            return 1
+        self.console.session_finished(ok, self.tokens, self.cost,
+                                      self.cfg.observability.db)
+        return 0 if ok else 1

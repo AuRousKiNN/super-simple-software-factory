@@ -31,7 +31,7 @@ fill in the current values and actual paths for this task.
 ---
 schema_version: 1
 revision: 1
-source_spec: specs/example.md
+source_spec: specs/example/spec.md
 tickets:
   - <output_dir>/tickets/TICKET-QUERY.md
 ---

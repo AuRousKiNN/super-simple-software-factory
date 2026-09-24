@@ -2,6 +2,10 @@
 
 ## Variables
 
+### bound spec_path
+
+{{spec_path}}
+
 ### prompt
 
 {{prompt}}
@@ -49,10 +53,9 @@ and future validation must remain clearly distinct from completed evidence.
 
 ## Save and hand off
 
-1. Resolve `spec_path` from the task or the referenced plan being revised. For a
-   new plan, inspect or create `specs/` and choose an available descriptive path
-   `specs/<adw_id>_<slug>.md`; `<adw_id>` is the session directory name in
-   `context_handoff_dir`. Keep this path for the lifetime of the plan.
+1. Use the exact host-bound `spec_path` shown above. The launching agent has
+   selected the new directory or existing spec. Do not rename, infer, or choose
+   another path. Only this root spec and the handoff copy are writable.
 2. Create a new spec with `revision: 1`. For each revision, read the current spec,
    update the same file in place, and increase its document revision by 1. Apply
    this rule to wording and ordering changes as well as behavioral changes. An

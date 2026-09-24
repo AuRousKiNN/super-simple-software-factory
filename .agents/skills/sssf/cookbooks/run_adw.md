@@ -7,10 +7,10 @@ the workflow the engineer named, or select an installed chain by reading each
 ## Launch
 
 ```bash
-uv run adws/adw_simple_sdlc.py "add a health endpoint"
+uv run adws/adw_simple_sdlc.py "add a health endpoint" --spec-dir specs/health-endpoint
 uv run adws/adw_scout.py requests/investigate.md
 uv run adws/adw_build_test.py "implement the accepted plan" --adw-id a1b2c3d4
-uv run adws/adw_plan.py "plan the change" --config path/to/roster.yaml
+uv run adws/adw_plan.py "plan the change" --spec-dir specs/example --config path/to/roster.yaml
 ```
 
 An inline prompt and a prompt-file path are equivalent. `--adw-id` joins a
@@ -76,3 +76,19 @@ Tell the engineer:
 A phase can succeed while reporting a red test result; `run.finish(accepted=...)`
 is the authoritative workflow verdict. Do not describe a partial or merely
 phase-complete run as accepted.
+
+## Choose the specification target
+
+The launching agent decides new versus existing work before invoking a planner.
+Select an unused readable `specs/<spec_key>` and pass `--spec-dir`; for revision,
+pass `--spec specs/<spec_key>/spec.md` in a new session. Do not ask the user to name
+routine directories. Missing targets and collisions fail before a planner turn;
+resolve them explicitly rather than retrying with automatically renamed paths.
+All subsequent work inherits this identity, including ticket implementation.
+
+Read `specs/<spec_key>/README.md` for observed progress and `spec.md` for the goal.
+Execution history is under `executions/<adw_id>/`. Never treat document generation
+or planning acceptance as whole-spec acceptance. An unsynced/freshness warning
+means the visible observation must be reconciled with current evidence.
+
+See [execution artifact recovery](../references/spec-artifacts.md).

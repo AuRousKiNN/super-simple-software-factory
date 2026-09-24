@@ -136,6 +136,10 @@ def test_consistency_correction_uses_same_runtime_thread(repo):
     assert runtime.requests[1].thread_id == "thread-shared"
 
 
+from adw_modules import spec_artifacts
+from adw_modules.data_types import DocumentDraftOutput, PlanningTarget, WorkflowOptions
+
+
 class Flow:
     """Exercise actual ADW branches, Git capture, quality commands and host receipts."""
     def __init__(self, root, reviews=(), name="flow"):
@@ -153,6 +157,7 @@ class Flow:
         self.tracer = SimpleNamespace(event=lambda event: None)
         self.console = SimpleNamespace(note=lambda text: None)
         self.closed = False
+        self.workspace_lock = SimpleNamespace(assert_held=lambda: None)
 
     @contextmanager
     def phase(self, params):
@@ -165,8 +170,11 @@ class Flow:
     def call(self, params, call):
         self.calls.append((params, call))
         if params.owner == "planner":
-            (self.repo_root / "spec.md").write_text("---\nrevision: 1\n---\nREQ-1: return a collection\n")
-            result = PlanOutput(status="success", spec_path="spec.md", commit_message="添加需求定义")
+            path = spec_artifacts.bind_plan(self, call.planning_target)
+            (self.repo_root / path).write_text("---\nrevision: 1\n---\nREQ-1: return a collection\n")
+            (self.context_handoff_dir / "plan.md").write_text((self.repo_root / path).read_text())
+            result = PlanOutput(status="success", spec_path=path, commit_message="添加需求定义")
+            spec_artifacts.publish_plan(self, result)
         elif params.owner == "builder":
             count = sum(p.owner == "builder" for p, c in self.calls)
             (self.repo_root / "code.py").write_text(f"value = {count}\n")
@@ -176,8 +184,12 @@ class Flow:
             report.write_text("Original proof and independent review")
             result = next(self.reviews).model_copy(update={"artifacts": [report.relative_to(self.repo_root).as_posix()]})
         elif params.owner == "documenter":
-            (self.repo_root / "delivery.md").write_text("Delivered collection behavior")
-            result = DocumentOutput(status="success", artifacts=["delivery.md"], commit_message="补充交付说明")
+            context = call.document_context
+            for path in [context.execution_draft_path, context.overview_draft_path]:
+                (self.repo_root / path).write_text("Observed collection behavior; check evidence and unresolved obligations.")
+            result = DocumentDraftOutput(status="success", execution_draft_path=context.execution_draft_path,
+                overview_draft_path=context.overview_draft_path,
+                artifacts=[context.execution_draft_path, context.overview_draft_path], commit_message="补充交付说明")
         else:
             raise AssertionError(params.owner)
         for gate in call.gates:
@@ -188,6 +200,8 @@ class Flow:
         self.accepted = accepted
         self.reason = reason
         self.closed = True
+        spec_artifacts.record_finish(self, accepted)
+        spec_artifacts.sync_finished(self)
         return 0 if accepted else 1
 
 
@@ -234,34 +248,38 @@ def test_loop_limits_count_actual_actions(monkeypatch, repo, kind, phase_prefix,
 
 def test_sdlc_retests_before_review_and_commits_only_approved_code(monkeypatch, repo):
     run = setup_flow(monkeypatch, repo, [review(blocker()), review()], adw_simple_sdlc)
-    assert adw_simple_sdlc.main("Implement collection") == 0
+    assert adw_simple_sdlc.main("Implement collection", target=PlanningTarget(spec_dir="specs/collection")) == 0
     names = [p.params.name for p in run.phases]
     assert names.index("revise_1") < names.index("test_2") < names.index("review_2") < names.index("commit_build") < names.index("document")
     review_calls = [c for p, c in run.calls if p.owner == "reviewer"]
     assert "required assertions executed" in review_calls[-1].previous.notes_for_next_agent
     assert review_calls[0].work_item == review_calls[1].work_item
-    assert git(repo, "log", "-1", "--format=%s") == "补充交付说明"
+    assert git(repo, "log", "-1", "--format=%s") == "同步规格验收事实与索引"
 
 
 def test_sdlc_rejection_and_failed_tests_cannot_deliver(monkeypatch, repo):
     run = setup_flow(monkeypatch, repo, [review()], adw_simple_sdlc)
     spec = QualityCheckSpec(name="test", area="backend", operation="build", argv=[sys.executable, "-c", "raise SystemExit(1)"])
     monkeypatch.setattr(quality, "check_specs", lambda: {"test": spec})
-    assert adw_simple_sdlc.main("Implement collection") == 1
+    assert adw_simple_sdlc.main("Implement collection", target=PlanningTarget(spec_dir="specs/collection")) == 1
     assert "failed" in run.reason
-    assert not any(p.owner == "documenter" for p, c in run.calls)
-    assert git(repo, "log", "-1", "--format=%s") == "添加需求定义"
+    assert any(p.owner == "documenter" for p, c in run.calls)
+    assert (repo / "code.py").read_text() == "value = 1\n"
+    assert "code.py" in git(repo, "status", "--porcelain")
+    meta, _ = spec_artifacts._read(repo / "specs/collection/README.md")
+    assert meta["acceptance"]["result"] == "未验收"
 
 
 def source_receipt(repo):
-    (repo / "spec.md").write_text("REQ-1")
+    (repo / "specs/collection").mkdir(parents=True, exist_ok=True)
+    (repo / "specs/collection/spec.md").write_text("---\nrevision: 1\n---\nREQ-1")
     source = Flow(repo, name="original")
     output = review(blocker("manual_validation"))
     output.required_verification = [ReviewObligation(id="V-1", description="Required manual validation", satisfied=False)]
     output.blocking[0].basis.append("V-1")
     with source.phase(PhaseParams(name="route", kind="code", owner="review_routing", description="Save the original review for follow-up")):
         path = routing.save(source, output, routing.decide(output, routing.RoutingPolicy()),
-                            routing.ReceiptContext("Implement collection", routing.baseline(source), tickets.spec_work_item(repo, "spec.md")))
+                            routing.ReceiptContext("Implement collection", routing.baseline(source), tickets.spec_work_item(repo, "specs/collection/spec.md")))
     evidence = repo / "evidence.md"
     evidence.write_text("Executed all steps on the current baseline; expected screen observed")
     request = RecheckRequest(original_review=tickets.artifact(repo, path.relative_to(repo).as_posix(), ".json"),
@@ -282,10 +300,10 @@ def test_recheck_evidence_only_starts_with_checks_or_review_never_builder(monkey
     request_path = repo / "recheck.json"
     request_path.write_text(request.model_dump_json())
     assert adw_recheck.main(str(request_path)) == 0
-    assert [p.owner for p, c in run.calls] == ["reviewer"]
+    assert [p.owner for p, c in run.calls] == ["reviewer", "documenter"]
     assert run.logs[0]["changed"] is False
     assert request.original_review.path in run.calls[0][1].previous.notes_for_next_agent
-    assert run.calls[0][1].work_item == tickets.spec_work_item(repo, "spec.md")
+    assert run.calls[0][1].work_item == tickets.spec_work_item(repo, "specs/collection/spec.md")
 
 
 @pytest.mark.parametrize("mutation,error", [
@@ -297,7 +315,7 @@ def test_recheck_rejects_invalid_or_inapplicable_inputs(monkeypatch, repo, mutat
     monkeypatch.chdir(repo)
     source, request = source_receipt(repo)
     if mutation == "definition":
-        (repo / "spec.md").write_text("changed definition")
+        (repo / "specs/collection/spec.md").write_text("changed definition")
     elif mutation == "evidence":
         (repo / "evidence.md").write_text("changed proof")
     elif mutation == "baseline":
@@ -336,8 +354,10 @@ def test_generated_chain_stops_or_delivers_on_verdict(monkeypatch, repo, approve
     spec.loader.exec_module(module)
     output = review() if approved else review(blocker())
     run = setup_flow(monkeypatch, repo, [output], module)
-    assert module.main("Implement collection") == (0 if approved else 1)
-    assert any(p.owner == "documenter" for p, c in run.calls) == approved
+    (repo / "specs/collection").mkdir(parents=True)
+    (repo / "specs/collection/spec.md").write_text("---\nrevision: 1\n---\nREQ-1")
+    assert module.main("Implement collection", WorkflowOptions(spec="specs/collection/spec.md")) == (0 if approved else 1)
+    assert any(p.owner == "documenter" for p, c in run.calls)
     assert run.closed
 
 

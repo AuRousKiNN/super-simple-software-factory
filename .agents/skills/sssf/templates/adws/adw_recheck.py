@@ -17,10 +17,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from adw_modules import agents, changes, gates, quality, review_routing, session
-from adw_modules.data_types import AgentCall, ChangeCapture, PhaseParams, RecheckRequest, ReviewOutput
+from adw_modules import agents, changes, gates, quality, review_routing, session, spec_artifacts, tickets
+from adw_modules.data_types import AgentCall, ChangeCapture, DocumentRequest, PhaseParams, RecheckRequest, ReviewOutput
 
-REQUIRED_AGENTS = ["reviewer"]
+REQUIRED_AGENTS = ["reviewer", "documenter"]
 MAX_VERIFICATION_LOOPS = 2
 
 
@@ -78,6 +78,13 @@ def main(request_path: str, config: str = "adws/adw_sssf_config/sssf.config.yaml
                 sorted(set(prepared.checks) | set(results))))
             ph.log(receipt=str(receipt), **decision.model_dump())
         if decision.action != "verify":
+            document = spec_artifacts.document(run, DocumentRequest(
+                work_item=prepared.source.work_item, purpose="记录补证与复核结果。" + decision.reason,
+                changes=previous, checks=list(results.values()), review=review,
+                review_receipt=tickets.artifact(run.repo_root, spec_artifacts.relative(run, receipt), ".json"),
+                evidence=[request.original_review, *[e.artifact for e in request.evidence],
+                    tickets.artifact(run.repo_root, spec_artifacts.relative(run, receipt), ".json")]))
+            spec_artifacts.prepare_finish(run, document)
             return run.finish(accepted=decision.action == "approve", reason=decision.reason)
         pending = decision.checks
 

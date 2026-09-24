@@ -108,3 +108,19 @@ After launching, show the engineer three things so a bad translation dies in sec
 3. **The `adw_id`**, so they can watch it (`just phases <adw_id>`).
 
 Then observe and report per `run_adw.md`. You run the system; you do not do the work inside it.
+
+## Choose the specification target
+
+The launching agent decides new versus existing work before invoking a planner.
+Select an unused readable `specs/<spec_key>` and pass `--spec-dir`; for revision,
+pass `--spec specs/<spec_key>/spec.md` in a new session. Do not ask the user to name
+routine directories. Missing targets and collisions fail before a planner turn;
+resolve them explicitly rather than retrying with automatically renamed paths.
+All subsequent work inherits this identity, including ticket implementation.
+
+Read `specs/<spec_key>/README.md` for observed progress and `spec.md` for the goal.
+Execution history is under `executions/<adw_id>/`. Never treat document generation
+or planning acceptance as whole-spec acceptance. An unsynced/freshness warning
+means the visible observation must be reconciled with current evidence.
+
+See [execution artifact recovery](../references/spec-artifacts.md).

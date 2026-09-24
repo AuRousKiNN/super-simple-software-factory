@@ -23,6 +23,7 @@ defaults:
     - adws/adw_modules/
     - adws/adw_sssf_config/
     - adws/adw_*.py
+    - adws/spec_artifacts_cli.py
   data_dir: adws/adw_data          # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
 
 codex:
@@ -65,7 +66,7 @@ agents:
       role: sssf_recon
       config_file: .codex/agents/sssf_recon.toml
     writes:
-      - "specs/*.tickets/**"
+      - "specs/*/spec.tickets/**"
 
   - name: builder
     model: gpt-5.6-sol
@@ -109,12 +110,8 @@ agents:
     model: gpt-6-sol
     thinking: medium
     color: "#e879f9"
-    purpose: Write up the change that was just made, from the diff; document only.
+    purpose: Explain execution evidence and update cumulative specification progress.
     prompt_engineering:
       system: adws/adw_data/prompt_engineering/documenter/system.md
       user: adws/adw_data/prompt_engineering/documenter/user.md
-    writes:                        # documentation only — "document only" is a rule now,
-      - app_docs/                  # not a line in a prompt the model may drift from.
-      - docs/                      # Markdown anywhere, because docs live next to the
-      - "**/*.md"                  # code they describe as often as in a docs folder.
-      - "*.md"
+    writes: []                     # current invocation reports/ and handoff only

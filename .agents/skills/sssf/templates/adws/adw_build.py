@@ -7,8 +7,8 @@
 Usage:
     uv run adws/adw_build.py "<prompt or path/to/prompt.md>" [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4]
 
-    uv run adws/adw_build.py --spec specs/example.md
-    uv run adws/adw_build.py --ticket specs/example.tickets/tickets/TICKET-QUERY.md --ticket-set specs/example.tickets/ticket-set.md
+    uv run adws/adw_build.py --spec specs/example/spec.md
+    uv run adws/adw_build.py --ticket specs/example/spec.tickets/tickets/TICKET-QUERY.md --ticket-set specs/example/spec.tickets/ticket-set.md
 
 Phases: engineer(request) -> code(input) -> builder
 

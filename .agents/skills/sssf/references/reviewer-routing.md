@@ -53,7 +53,9 @@ are looked up in this registry, never executed as shell commands. Inspect actual
 commands/logs, scope and assertions to assess evidence sufficiency.
 
 Approval plus applicable passing mandatory checks permits downstream delivery.
-SDLC commits implementation and documentation only after that decision. These
+SDLC commits implementation only after approval. It also publishes execution
+records for controlled handoffs, preserving the unaccepted result and leaving
+unfinished code uncommitted. These
 starter workflows do not publish ticket-acceptance records. Custom acceptance
 ADWs must establish all checks, manual validation, applicability and integrated
 obligations, finish accepted, and only then call `tickets.record_acceptance`.
@@ -129,3 +131,9 @@ sites, routing branches and quality registry together. Existing string blockers
 are not accepted by the new contract. No runtime/SQLite schema bump, importer or
 silent compatibility fallback is added. Gate correction is for current output
 consistency, not migration of customized prompts.
+
+Recheck includes a documenter stage: it passes the bound root/ticket, actual check
+results, review receipt and supplied evidence through `DocumentRequest`. Empty
+implementation diffs are valid and never fall back to the preceding commit.
+Generated documentation and recheck acceptance do not independently establish
+whole-spec integration acceptance. See [spec artifacts](spec-artifacts.md).

@@ -264,10 +264,31 @@ class RecheckRequest(BaseModel):
     checks: list[str] = Field(default_factory=list)
 
 
-class DocumentOutput(EnvelopeBase):
-    """Where the write-up of a completed change landed."""
+class PlanningTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    spec_dir: str | None = None
+    spec: str | None = None
 
-    document_path: str = ""         # the doc in the repo, e.g. app_docs/<adw_id>_<slug>.md
+    @model_validator(mode="after")
+    def exclusive(self):
+        if bool(self.spec_dir) == bool(self.spec):
+            raise ValueError("provide exactly one of --spec-dir or --spec")
+        return self
+
+
+class DocumentDraftOutput(EnvelopeBase):
+    """Agent-authored bodies, never a publication or acceptance receipt."""
+    execution_draft_path: str
+    overview_draft_path: str
+    documented_files: list[str] = Field(default_factory=list)
+    commit_message: str = ""
+
+
+class DocumentOutput(EnvelopeBase):
+    """Host-published execution report and cumulative overview."""
+    spec_path: str
+    document_path: str
+    overview_path: str
     documented_files: list[str] = Field(default_factory=list)
     commit_message: str = ""
 
@@ -393,6 +414,35 @@ class VerifyOutput(EnvelopeBase):
     failures: list[str] = Field(default_factory=list)
 
 
+class DocumentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    work_item: SpecWorkItem | TicketWorkItem = Field(discriminator="kind")
+    purpose: str = Field(min_length=1)
+    changes: ChangesOutput | None = None
+    checks: list[QualityCheckResult] = Field(default_factory=list)
+    review: ReviewOutput | None = None
+    review_receipt: ArtifactRef | None = None
+    evidence: list[ArtifactRef] = Field(default_factory=list)
+    record_requested: bool = True
+
+
+class DocumentContext(DocumentRequest):
+    review_applicable: bool | None = None
+    spec_key: str
+    revision: int
+    overview: ArtifactRef
+    history: list[ArtifactRef] = Field(default_factory=list)
+    baseline: str
+    snapshot: str
+    observed_at: str
+    execution_id: str
+    invocation_dir: str
+    execution_draft_path: str
+    overview_draft_path: str
+    document_path: str
+    overview_path: str
+
+
 # ── Agent calls ──────────────────────────────────────────────────────────────
 
 class GateCheck(BaseModel):
@@ -439,6 +489,8 @@ class AgentCall(BaseModel):
     previous: Optional[EnvelopeBase] = None
     work_item: SpecWorkItem | TicketWorkItem | None = Field(default=None, discriminator="kind")
     decomposition: DecompositionInput | None = None
+    planning_target: PlanningTarget | None = None
+    document_context: DocumentContext | None = None
     gates: list[Callable] = Field(default_factory=list)   # gate(envelope, run) -> list[str]
 
 
@@ -497,7 +549,7 @@ class ConfigDefaults(StrictConfigModel):
     # The factory's own code is the default: an agent must not be able to edit
     # the machinery that decides whether its work passed.
     protected_files: list[str] = Field(default_factory=lambda: [
-        "adws/adw_modules/", "adws/adw_sssf_config/", "adws/adw_*.py",
+        "adws/adw_modules/", "adws/adw_sssf_config/", "adws/adw_*.py", "adws/spec_artifacts_cli.py",
     ])
     data_dir: str = "adws/adw_data"
 
@@ -676,10 +728,26 @@ class BuildInput(BaseModel):
 
 BUILTIN_OUTPUT_TYPES = {
     "planner": PlanOutput, "decomposer": DecomposeOutput, "builder": BuildOutput,
-    "scout": ScoutOutput, "reviewer": ReviewOutput, "documenter": DocumentOutput,
+    "scout": ScoutOutput, "reviewer": ReviewOutput, "documenter": DocumentDraftOutput,
 }
 
 
 class TicketSelection(BaseModel):
     ticket_id: str
     dependency_evidence: str | None = None
+
+
+class WorkflowOptions(BaseModel):
+    """Generated workflow launch bindings, independent of previous envelopes."""
+    config: str = "adws/adw_sssf_config/sssf.config.yaml"
+    adw_id: str | None = None
+    planning_target: PlanningTarget | None = None
+    spec: str | None = None
+    selection: TicketSelection | None = None
+
+
+class FinishOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    receipt: ArtifactRef | None = None
+    accepts_scope: bool = False
+    commit: bool = False

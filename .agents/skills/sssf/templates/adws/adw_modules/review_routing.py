@@ -87,6 +87,9 @@ def tree_files(run) -> dict[str, str]:
     paths = set(_git(run, "ls-files", "-z", "--cached", "--others", "--exclude-standard").split(b"\0"))
     files = {}
     for raw in sorted(paths - {b""}):
+        from .spec_artifacts import managed_path
+        if managed_path(os.fsdecode(raw)):
+            continue
         path = root / os.fsdecode(raw)
         if path.is_relative_to(sessions.resolve()):
             continue

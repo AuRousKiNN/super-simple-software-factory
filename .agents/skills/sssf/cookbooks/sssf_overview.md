@@ -2,8 +2,8 @@
 
 SSSF is a Python control plane around the official Codex SDK. An ADW is a thin
 script made of named phases. A phase belongs to the engineer, an agent, or a
-deterministic code step. Typed envelopes and files in `context_handoff/` are the
-only supported handoff channels.
+deterministic code step. Typed envelopes, explicit work-item/document contexts and files in
+`context_handoff/` carry phase inputs.
 
 ```text
 adws/
@@ -46,3 +46,9 @@ See [ticket contracts](../references/tickets.md) for evidence and session bindin
 Review ownership, bounded repair/verification, planning handoffs and the
 `adw_recheck.py` evidence-only entry are described in the
 [Reviewer routing contract](../references/reviewer-routing.md).
+
+Each specification has a stable `specs/<spec_key>/` directory. The launching
+agent chooses `--spec-dir` for new plans or `--spec` for revisions. `spec.md`
+defines the goal, `README.md` records observed progress, and `executions/` retains
+immutable execution history. Runtime owns metadata, acceptance provenance and
+the root index. See [specification artifacts](../references/spec-artifacts.md).

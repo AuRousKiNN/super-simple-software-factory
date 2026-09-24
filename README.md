@@ -197,9 +197,9 @@ provably separate counter. Cancelling a parent closes unfinished children.
 ```bash
 just prompt "summarize this repo"
 just scout "where is authentication handled?"
-just plan "add a health endpoint"
-just plan-build "implement the approved plan"
-just sdlc "plan, build, and test the change"
+just plan "add a health endpoint" --spec-dir specs/health-endpoint
+just plan-build "implement the approved plan" --spec specs/health-endpoint/spec.md
+just sdlc "plan, build, and test the change" --spec-dir specs/example
 just simple-sdlc "run plan, build, test, review, and document"
 ```
 
@@ -301,10 +301,10 @@ source binding and dependency relationships, without validating artifact formatt
 
 ```bash
 uv run adws/adw_plan_decompose.py "add query and export capabilities"
-uv run adws/adw_decompose.py --spec specs/example.md
-uv run adws/adw_build.py --spec specs/example.md
-uv run adws/adw_build.py --ticket specs/example.tickets/tickets/TICKET-QUERY.md \
-  --ticket-set specs/example.tickets/ticket-set.md
+uv run adws/adw_decompose.py --spec specs/example/spec.md
+uv run adws/adw_build.py --spec specs/example/spec.md
+uv run adws/adw_build.py --ticket specs/example/spec.tickets/tickets/TICKET-QUERY.md \
+  --ticket-set specs/example/spec.tickets/ticket-set.md
 ```
 
 Use a new session for each ticket. Repairs retain the same work item and thread;
@@ -315,3 +315,18 @@ revalidate evidence after baseline or environment changes. The build entry repor
 implementation only. The ADW owns checks, manual obligations and final acceptance.
 See [the ticket contract](.agents/skills/sssf/references/tickets.md) and
 [upgrade instructions](.agents/skills/sssf/cookbooks/install.md).
+
+### 规格与执行现状
+
+启动规划时显式选择新目录或已有规格：
+
+```bash
+uv run adws/adw_plan.py "规划登录限流" --spec-dir specs/login-rate-limit
+uv run adws/adw_simple_sdlc.py "实现登录限流" --spec specs/login-rate-limit/spec.md
+```
+
+`spec.md` 定义目标，规格目录中的 `README.md` 汇总最近观察到的实现和验证现状，
+`executions/<adw_id>/` 保留每次执行报告。`specs/README.md` 是宿主重建的总索引。
+文档生成、工作流成功和完整规格验收分别记录；部分 ticket 完成不会自动验收整个规格。
+文稿发布失败可重放，已发布历史不可覆盖。详见
+[合同与恢复命令](.agents/skills/sssf/references/spec-artifacts.md)。
