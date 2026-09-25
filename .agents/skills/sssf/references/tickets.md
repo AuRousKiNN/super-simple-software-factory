@@ -115,4 +115,4 @@ use a fresh `adw-recheck` session to establish and publish current evidence.
 无关改动本身不使证据过时。scout 判定已过时或无法确认时，ADW 直接返回临时调查结果并立即失败，
 不进入 builder、质量检查或 reviewer，也不自动补验。builder/reviewer 不重复判断证据新鲜度。
 证据哈希、目标定义和必需检查仍受校验。
-票据重验文档保存在会话目录中，不创建提交；正常 build 仍发布并提交规格执行文档。
+票据重验更新规格 README、执行记录和索引，回写对应票据范围的本次验收结果；成功时仅提交发布的文档，并按最终 HEAD 签发验收。历史失败记录保留。

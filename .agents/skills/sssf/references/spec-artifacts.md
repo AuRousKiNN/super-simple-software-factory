@@ -77,11 +77,12 @@ reuse; Markdown summaries are not original acceptance evidence.
 
 ## Ticket recheck records
 
-Ticket-mode `adw-recheck` uses `DocumentRequest.session_only=True`. It publishes
-its report and overview under `<session>/documentation/`, then synchronizes run
-facts there without updating the repository index or committing. Rechecks avoid
-extra documentation commits; prerequisite evidence need not share one exact HEAD.
-Ordinary build and planned
-delivery still publish and commit the canonical specification execution documents.
-The original scope observation remains historical; current dependency acceptance
-comes from the new session's `ticket-acceptance.json`.
+Ticket-mode `adw-recheck` publishes its execution report and overview under the
+canonical specification directory and refreshes `specs/README.md`. Finish replaces
+the bound scope's acceptance with the current verdict and receipt, including failed
+rechecks, while preserving historical execution reports. Successful ticket rechecks
+commit only the published documentation and issue `ticket-acceptance.json` against
+the final HEAD. Prerequisite evidence need not share one exact HEAD; documentation
+commits do not change implementation content. Ticket acceptance never implies
+whole-spec integration acceptance. Spec-mode recheck also projects the actual finish
+verdict and explicit review receipt for its whole-spec scope.

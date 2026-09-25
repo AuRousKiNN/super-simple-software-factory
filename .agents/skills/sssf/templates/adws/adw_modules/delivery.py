@@ -174,14 +174,17 @@ def complete(run, evidence: DeliveryEvidence) -> int:
         purpose="记录实施、质量检查、独立审查及未关闭义务。" + evidence.decision.reason,
         changes=capture(run, evidence.request.build_base, evidence.decision.reason),
         checks=list(evidence.results.values()), review=evidence.review, review_receipt=receipt_ref,
-        evidence=list(evidence.extra_evidence), session_only=evidence.recheck))
+        evidence=list(evidence.extra_evidence)))
     if document is None:
         raise ValueError("delivery documentation requires specs/<key>/spec.md; migrate the target layout")
-    if approved and not evidence.recheck:
+    if approved:
         with run.phase(PhaseParams(name="commit_delivery", kind="code", owner="git",
                                    description="Commit only verified implementation and its published execution record")) as ph:
             _assert_unchanged(run, receipt.tree_sha256)
             paths = git_helper.diff_files("HEAD") + git_helper.untracked_files()
+            if evidence.recheck:
+                # Rechecks publish current spec facts without committing implementation or supplied proof.
+                paths = [p for p in paths if p in document.artifacts]
             sessions = run.session_dir.parent.resolve()
             paths = [p for p in paths if not (run.repo_root / p).resolve().is_relative_to(sessions)]
             ph.log(sha=git_helper.commit_paths(evidence.commit_message + "\n\n" +
@@ -189,7 +192,7 @@ def complete(run, evidence: DeliveryEvidence) -> int:
             _assert_unchanged(run, receipt.tree_sha256)
             tickets._assert_clean_baseline(run)
     spec_artifacts.prepare_finish(run, document, FinishOptions(receipt=receipt_ref,
-        accepts_scope=True, commit=approved and not evidence.recheck, session_only=evidence.recheck))
+        accepts_scope=True, commit=approved))
     publication = None
     if approved and isinstance(item, TicketWorkItem):
         checks = [tickets.artifact(run.repo_root, _relative(run, c.output_artifact), Path(c.output_artifact).suffix) for c in evidence.results.values()]

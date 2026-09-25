@@ -11,14 +11,15 @@ Phases: code(recheck_input) -> scout(evidence freshness) -> [code(checks)] -> co
         -> [code(checks) -> code(changes) -> reviewer -> code(route)] bounded
 
 Always creates a new session without a builder. Ticket mode reruns required checks,
-reviews all obligations, saves session documentation and issues current-HEAD acceptance without advancing HEAD.
+reviews all obligations, publishes specification documentation and issues current-HEAD acceptance.
+Successful ticket rechecks commit documentation only; implementation content stays unchanged.
 """
 import argparse
 import sys
 from pathlib import Path
 
 from adw_modules import delivery, agents, changes, evidence_freshness, gates, quality, review_routing, session, spec_artifacts, tickets
-from adw_modules.data_types import TicketWorkItem, AgentCall, ChangeCapture, DocumentRequest, PhaseParams, RecheckRequest, ReviewOutput
+from adw_modules.data_types import TicketWorkItem, AgentCall, ChangeCapture, DocumentRequest, FinishOptions, PhaseParams, RecheckRequest, ReviewOutput
 
 REQUIRED_AGENTS = ["scout", "reviewer", "documenter"]
 MAX_VERIFICATION_LOOPS = 2
@@ -97,7 +98,9 @@ def main(request_path: str, config: str = "adws/adw_sssf_config/sssf.config.yaml
                 review_receipt=tickets.artifact(run.repo_root, spec_artifacts.relative(run, receipt), ".json"),
                 evidence=[request.original_review, *[e.artifact for e in request.evidence],
                     tickets.artifact(run.repo_root, spec_artifacts.relative(run, receipt), ".json")]))
-            spec_artifacts.prepare_finish(run, document)
+            spec_artifacts.prepare_finish(run, document, FinishOptions(
+                receipt=tickets.artifact(run.repo_root, spec_artifacts.relative(run, receipt), ".json"),
+                accepts_scope=True))
             return run.finish(accepted=decision.action == "approve", reason=decision.reason)
         pending = decision.checks
 

@@ -135,8 +135,8 @@ def test_commit_hook_mutation_blocks_acceptance(monkeypatch, repo):
     assert not list((repo / 'sessions').glob('*/ticket-acceptance.json'))
 
 
-def test_two_prerequisites_can_revalidate_without_moving_head(monkeypatch, repo):
-    # Evidence-only rechecks may still publish multiple records without moving HEAD.
+def test_two_prerequisites_can_revalidate_across_documentation_commits(monkeypatch, repo):
+    # Prior acceptance remains usable across commits that only update specification records.
     from test_tickets import write_ticket
     set_path, first, second = ticket_plan(repo)
     write_ticket(repo / second, 'TICKET-B', [])
@@ -177,7 +177,10 @@ def test_two_prerequisites_can_revalidate_without_moving_head(monkeypatch, repo)
         run = Flow(repo, [review()], name=f'recheck-{index}')
         monkeypatch.setattr(adw_recheck.session, 'ensure', lambda *_: run)
         assert adw_recheck.main(str(request_path)) == 0
-        assert git(repo, 'rev-parse', 'HEAD') == head
+        new_head = git(repo, 'rev-parse', 'HEAD')
+        assert new_head != head
+        assert all(spec_artifacts.managed_path(p) for p in git(repo, 'diff', '--name-only', head, new_head).splitlines())
+        head = new_head
         assert git(repo, 'status', '--porcelain') == ''
         refs.append(tickets.artifact(repo, (run.session_dir / 'ticket-acceptance.json').relative_to(repo).as_posix(), '.json'))
     manifest = run.session_dir / 'dependencies.json'
@@ -226,3 +229,44 @@ def test_installer_retires_only_untouched_legacy_entries(tmp_path, customized):
         assert new.is_file() and not old.exists()
         assert invoke('--rollback', 'latest').returncode == 0
         assert old.read_bytes() == original and not new.exists()
+
+
+@pytest.mark.parametrize("ticket_mode", [False, True])
+@pytest.mark.parametrize("approved", [False, True])
+def test_recheck_replaces_failed_canonical_acceptance(monkeypatch, repo, ticket_mode, approved):
+    from adw_modules.data_types import RecheckEvidence
+    if ticket_mode:
+        source, result, *_ = build_ticket(monkeypatch, repo, review(blocker("environment")))
+        overview = repo / "specs/demo/README.md"
+    else:
+        source = setup_flow(monkeypatch, repo, [review(blocker("environment"))], adw_build)
+        result = adw_build.main("Implement collection")
+        overview = repo / "specs/request-flow/README.md"
+    assert result == 1
+    assert spec_artifacts._read(overview)[0]["acceptance"]["accepted"] is False
+    git(repo, "add", "code.py", "specs")
+    git(repo, "commit", "-qm", "保留失败交付供复查")
+    original_report = next(overview.parent.glob("executions/*/*.md"))
+    original_bytes = original_report.read_bytes()
+    receipt = next((source.session_dir / "review-routing").glob("*.json"))
+    proof = source.session_dir / "environment.md"
+    proof.write_text("Environment restored and verified")
+    request = RecheckRequest(
+        original_review=tickets.artifact(repo, receipt.relative_to(repo).as_posix(), ".json"),
+        baseline=git(repo, "rev-parse", "HEAD"),
+        evidence=[RecheckEvidence(artifact=tickets.artifact(repo, proof.relative_to(repo).as_posix()),
+                  resolves=["B-1"], applicability="Restored environment on current implementation")])
+    request_path = source.session_dir / "recheck.json"
+    request_path.write_text(request.model_dump_json())
+    run = Flow(repo, [review() if approved else review(blocker("environment"))], name="recheck-result")
+    monkeypatch.setattr(adw_recheck.session, "ensure", lambda *_: run)
+    assert adw_recheck.main(str(request_path)) == (0 if approved else 1)
+    meta, _ = spec_artifacts._read(overview)
+    assert meta["run_result"]["adw_id"] == run.adw_id
+    assert meta["acceptance"]["accepted"] is approved
+    assert meta["acceptance"]["scope"] == ("TICKET-A" if ticket_mode else "整个规格")
+    assert run.adw_id in meta["acceptance"]["source"]
+    assert (overview.parent / meta["latest_execution"]).is_file()
+    assert original_report.read_bytes() == original_bytes
+    assert "builder" not in [p.owner for p, _ in run.calls]
+    assert ("通过" if approved else "未验收") in (repo / "specs/README.md").read_text()

@@ -126,8 +126,8 @@ refreshed `dependency_evidence` when affected prerequisites need revalidation, i
 topological order in separately requested work. Scout alone decides applicability;
 unrelated commits are not grounds to reject or reissue prior evidence.
 An approved source may use `evidence: []`; every applicable check is rerun and the
-reviewer reassesses all obligations. Successful ticket recheck records documentation inside the session, leaves HEAD
-unchanged, finishes and publishes a new current-baseline ticket acceptance. It never resumes
+reviewer reassesses all obligations. Successful ticket recheck publishes canonical specification documentation, commits only
+those documents, finishes and publishes a new current-baseline ticket acceptance. It never resumes
 an old program counter or promotes a ticket to whole-spec integration acceptance.
 
 ## Existing installations
@@ -143,15 +143,22 @@ are not accepted by the new contract. No runtime/SQLite schema bump, importer or
 silent compatibility fallback is added. Gate correction is for current output
 consistency, not migration of customized prompts.
 
+When upgrading an existing installation, merge `adw-recheck.py` together with
+`adw_modules/delivery.py`: the entrypoint must pass the review receipt and
+`accepts_scope=True` to finish projection, and ticket rechecks must publish canonical
+specification documents. Updating only the documenter prompt does not repair stale
+acceptance metadata. Historical sessions and reports remain unchanged; a new recheck
+records the current result.
+
 Recheck includes a documenter stage: it passes the bound root/ticket, actual check
 results, review receipt and supplied evidence through `DocumentRequest`. Empty
 implementation diffs are valid and never fall back to the preceding commit.
-Generated documentation and recheck acceptance do not independently establish
-whole-spec integration acceptance. See [spec artifacts](spec-artifacts.md).
+Finish projects the actual verdict for the bound scope into the specification README
+and index. Ticket recheck acceptance does not establish whole-spec integration acceptance. See [spec artifacts](spec-artifacts.md).
 
 先前证据不要求与当前 HEAD 完全一致。多个前置票据可以使用不同提交上的验收记录，
 使用先前证据前，由一个只读 scout 简单调查相关代码、测试、配置和环境是否仍适用；
 无关改动本身不使证据过时。scout 判定已过时或无法确认时，ADW 直接返回临时调查结果并立即失败，
 不进入 builder、质量检查或 reviewer，也不自动补验。builder/reviewer 不重复判断证据新鲜度。
 证据哈希、目标定义和必需检查仍受校验。
-票据重验文档保存在会话目录中，不创建提交；正常 build 仍发布并提交规格执行文档。
+重验会更新规格 README、执行记录和索引，并回写本次范围验收结果；成功的票据重验仅提交这些文档，按最终 HEAD 签发票据验收。历史失败记录保留，票据通过不代表整个规格通过。
