@@ -77,19 +77,16 @@ require the explicit upgrade in the installation guide; never silently omit them
 Each AcceptanceRecord records
 schema_version=1, accepted=true, adw_id, ticket_id, definition_sha256, baseline,
 checks, reviews, manual_validation and applicability. Checks/reviews are nonempty
-artifact-reference lists. Each blocker needs exactly one record. Current source
-hashes and evidence hashes must match. The recorded Git HEAD identifies where
-acceptance was observed; it need not equal the current HEAD. Initial binding still
-requires a clean implementation baseline. Before builder, one read-only scout
-briefly investigates the records and relevant changes to code, tests, dependencies,
-configuration and environment. Unrelated commits do not require reissuing evidence.
-The scout returns a temporary inline decision with no report artifacts. No
-`evidence-freshness.json` or scout Markdown report is written for this investigation;
-normal runtime tracing remains. Any `stale` or `uncertain` assessment immediately finishes with accepted=false and exit code 1, including the evidence
-path and scout's reason. No builder, checks, reviewer, documenter or automatic
-revalidation runs after rejection. Builder/reviewer consume scout's decision
-without repeating or overriding freshness judgment. Required checks and independent
-acceptance review still run after an applicable verdict; freshness is not acceptance.
+artifact-reference lists. Each blocker needs exactly one successful current-definition
+record. The receipt and retained reports under the session directory remain immutable
+and hash-checked. Referenced source, tests and business documents may evolve; their
+recorded hashes describe the accepted baseline and do not lock current workspace files.
+Initial binding still requires a clean implementation baseline. Ordinary delivery
+checks prerequisite acceptance deterministically and starts builder directly, without
+an evidence scout. Current checks, independent review and whole-spec integration
+acceptance establish correctness after subsequent changes. Explicit recheck retains
+its targeted evidence investigation.
+
 
 `record_acceptance(run, record)` is a host-only API after `run.finish(accepted=True)`.
 `adw-build` and ticket-mode `adw-recheck` establish actual check execution, review
@@ -140,16 +137,15 @@ untracked nonignored engineering inputs (including specs/) are rejected. Only th
 configured host session directory is excluded; this exclusion never grants agents
 write permission. Bound planning files must be tracked and committed even if ignored.
 
-Before scout, code writes `work_item.json` and `delivery-input.json` inside the current
+Before builder, code writes `work_item.json` and `delivery-input.json` inside the current
 session. The latter binds HEAD, selected proof and configuration identity. Resume
 reuses that selection; newer receipts cannot silently replace it. Changed bindings
 or baseline require a new session. Host files are protected by permission snapshots.
 
-Scout is read-only and only judges applicability. Code validates its structured
-coverage and permits builder only on applicable verdicts. Stale/uncertain stops the
-run. After scout, code rechecks bound hashes and the implementation baseline. No
-prerequisites means no scout. Checks, independent review, bounded repair loops,
-documentation, commit and host acceptance remain mandatory as before.
+Code verifies the frozen binding and starts builder directly. Prerequisite receipts
+establish historical acceptance, without a separate scout phase or locks on referenced
+business files. Current checks, independent review, bounded repair loops,
+documentation, commit and host acceptance remain mandatory.
 
 Expected launch validation failures produce `preflight-result.json` with
 `status=preflight_rejected`, a logged classification, and exit code 2, before any

@@ -26,7 +26,7 @@ replace rather than append.
 |---|---|---|
 | `auth` | `cli` or `api_key` | operator login or unattended key mode |
 | `approval_policy` | `never` | no interactive elevation prompt |
-| `turn_timeout_s` | `900` | total turn deadline |
+| `turn_timeout_s` | `2400` | total turn deadline |
 | `startup_timeout_s` | `30` | runtime startup deadline |
 | `shutdown_grace_s` | `10` | cancellation/close grace period |
 | `command_network_access` | `false` | command network remains disabled |

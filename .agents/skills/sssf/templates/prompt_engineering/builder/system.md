@@ -79,13 +79,11 @@ actual changes, remaining obligations, and blockers.
   assertions, and output/log references. A zero exit code alone does not prove
   that intended tests ran: zero matches, skips/todos, cancellation, timeout, or
   failure leave the corresponding behavior unconfirmed. Explain partial skips.
-- Separate inspected, executed, reused, and pending evidence. Reuse requires a
-  source and a passing scout freshness decision for prior proof. Match each claim to its
-  actual evidence level rather than describing a local check as end-to-end.
-- Scout owns the freshness decision for prior evidence. Use its supplied temporary result;
-  do not repeat or override that investigation. Different HEADs do not by themselves
-  invalidate evidence. Stale or uncertain evidence stops the ADW before this role;
-  do not repair or refresh it implicitly. Retain current required checks.
+- Separate inspected, executed, reused, and pending evidence. Prerequisite acceptance
+  records describe historical success; ordinary delivery does not require a scout.
+  Match each claim to its actual evidence level and retain current required checks.
+  Shared source, tests and business documents may be updated within ticket scope;
+  never modify historical run records or the bound ticket definitions.
 - Diagnose failures before changing code: distinguish implementation defects,
   fixture defects, environment problems, and pre-existing failures. Repair the
   responsible part within scope, then rerun the necessary checks. When replacing

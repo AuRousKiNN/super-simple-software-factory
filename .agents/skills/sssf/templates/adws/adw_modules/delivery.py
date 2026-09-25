@@ -10,12 +10,12 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import changes, evidence_freshness, gates, git_helper, quality, review_routing, spec_artifacts, tickets
+from . import changes, gates, git_helper, quality, review_routing, spec_artifacts, tickets
 from .data_types import (AcceptanceRecord, AgentCall, ArtifactRef, BuildInput, BuildOutput,
-                         ChangeCapture, DocumentRequest, EnvelopeBase, FinishOptions, GenericOutput,
+                         ChangeCapture, DocumentRequest, EnvelopeBase, FinishOptions,
                          PhaseParams, ReviewOutput, ReviewReceipt, ReviewDecision, SpecWorkItem, TicketWorkItem)
 
-REQUIRED_AGENTS = ["scout", "builder", "reviewer", "documenter"]
+REQUIRED_AGENTS = ["builder", "reviewer", "documenter"]
 MAX_REVISION_LOOPS = 3
 MAX_VERIFICATION_LOOPS = 2
 
@@ -95,10 +95,10 @@ def verify_frozen_input(run, request):
     if (snapshot["work_item"] != request.work_item.model_dump()
             or snapshot["baseline"] != request.build_base
             or snapshot["config_sha256"] != tickets._digest(config)):
-        raise tickets.TicketError("frozen delivery inputs changed during evidence investigation")
+        raise tickets.TicketError("frozen delivery inputs changed before build")
     tickets.validate_work_item(run, request.work_item, check_tree=False)
     if tickets._git(run.repo_root, "rev-parse", "HEAD") != request.build_base:
-        raise tickets.TicketError("delivery baseline changed during evidence investigation")
+        raise tickets.TicketError("delivery baseline changed before build")
     if isinstance(request.work_item, TicketWorkItem):
         tickets._assert_clean_baseline(run)
 
@@ -140,15 +140,8 @@ def execute(run, request: DeliveryRequest) -> int:
     required = quality.required_checks()
     freeze_input(run, request)
     spec_artifacts._layout(run, request.work_item.spec.path)
-    freshness = evidence_freshness.inspect(run, evidence_freshness.dependency_refs(request.work_item), request.work_item)
-    reason = evidence_freshness.failure_reason(freshness)
-    if reason:
-        return run.finish(accepted=False, reason=reason)
     verify_frozen_input(run, request)
     prior = request.previous
-    if freshness is not None:
-        prior = (prior or GenericOutput(status="success")).model_copy(update={
-            "notes_for_next_agent": (prior.notes_for_next_agent + "\n" if prior else "") + evidence_freshness.notes(freshness)})
     tickets.bind_work_item(run, AgentCall(output_type=BuildOutput, prompt=request.prompt,
                                          work_item=request.work_item), "builder")
     with run.phase(PhaseParams(name="build", kind="agent", owner="builder", retries=1,
@@ -171,11 +164,10 @@ def execute(run, request: DeliveryRequest) -> int:
                                    description="Capture actual changes and execution evidence for independent review")) as ph:
             results = review_routing.refresh_results(run, results)
             review_input = capture(run, request.build_base, review_routing.evidence_notes(results)
-                                   + "\nQuality applicability: " + str(quality.not_applicable_checks())
-                                   + "\n" + evidence_freshness.notes(freshness))
+                                   + "\nQuality applicability: " + str(quality.not_applicable_checks()))
             ph.log(diff=review_input.diff_path)
         with run.phase(PhaseParams(name=f"review_{round_number}", kind="agent", owner="reviewer", retries=1,
-                                   description="Judge target requirements and manual obligations using scout-validated prior evidence")) as ph:
+                                   description="Judge target requirements and manual obligations against current checks")) as ph:
             review = ph.call(AgentCall(output_type=ReviewOutput, prompt=request.prompt,
                 work_item=request.work_item, previous=review_input,
                 gates=[gates.artifacts_exist, gates.verdict_consistent, gates.obligations_retained(previous_review)]))

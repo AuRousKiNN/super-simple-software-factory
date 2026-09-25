@@ -574,7 +574,7 @@ class ConfigDefaults(StrictConfigModel):
 class CodexRuntimeConfig(StrictConfigModel):
     auth: Literal["cli", "api_key"] = "cli"
     approval_policy: Literal["never"] = "never"
-    turn_timeout_s: int = Field(default=900, ge=1)
+    turn_timeout_s: int = Field(default=2400, ge=1)
     startup_timeout_s: int = Field(default=30, ge=1)
     shutdown_grace_s: int = Field(default=10, ge=1)
     command_network_access: bool = False

@@ -64,11 +64,11 @@ test cannot be excluded. A code phase running a red suite has executed correctly
 but the shared acceptance decision cannot approve failed, missing or stale checks.
 
 Keep the loop in the shared module so adw-build, adw-simple-sdlc and generated
-builder chains retain identical delivery guarantees. Delivery with prerequisite
-evidence first runs `evidence_freshness.inspect`: one read-only scout decides
-applicability, and stale/uncertain evidence immediately calls run.finish(accepted=False)
-before builder or checks. Recheck applies the same gate before checks/reviewer.
-Do not send freshness decisions to builder/reviewer or automatically repair them.
+builder chains retain identical delivery guarantees. Ordinary delivery checks successful
+current-definition prerequisite receipts and starts builder directly. It does not run
+an evidence scout or freeze referenced implementation files. Retained session reports
+and receipts stay immutable. Explicit recheck still uses `evidence_freshness.inspect`
+before checks/reviewer to assess the evidence supplied for that recheck.
 
 Three distinctions worth keeping straight:
 

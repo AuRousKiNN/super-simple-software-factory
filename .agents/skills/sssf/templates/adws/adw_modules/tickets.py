@@ -219,6 +219,14 @@ def _git(root: Path, *args) -> str:
     return result.stdout.strip()
 
 
+def historical_evidence(run, record: AcceptanceRecord) -> list[ArtifactRef]:
+    """Protect retained run reports, not the evolving files they once verified."""
+    from .acceptance_history import sessions
+    directory = sessions(run).resolve()
+    return [ref for ref in record.checks + record.reviews + record.manual_validation
+            if repo_path(run.repo_root, ref.path).resolve().is_relative_to(directory)]
+
+
 def _verify_evidence(run, item: TicketWorkItem, payload: dict, check_tree: bool = True) -> None:
     selected = next(t for t in payload["tickets"] if t["id"] == item.ticket_id)
     records = {}
@@ -236,10 +244,9 @@ def _verify_evidence(run, item: TicketWorkItem, payload: dict, check_tree: bool 
             raise TicketError("duplicate dependency evidence")
         if record.definition_sha256 != payload["definition_sha256"]:
             raise TicketError(f"stale dependency definition: {record.ticket_id}")
-        # Baseline records provenance, not an exact-HEAD reuse requirement.
-        # The evidence scout assesses whether intervening changes affect the
-        # prerequisite's code, tests, configuration or environment.
-        for evidence in record.checks + record.reviews + record.manual_validation:
+        # Acceptance proves the prerequisite passed at its recorded baseline.
+        # Current checks and integration acceptance cover subsequent changes.
+        for evidence in historical_evidence(run, record):
             verify_ref(run.repo_root, evidence)
         records[record.ticket_id] = record
     if set(records) != set(selected["blocked_by"]):
@@ -335,7 +342,7 @@ def validate_work_item(run, item, check_tree: bool = True) -> list[str]:
         _verify_evidence(run, item, payload, check_tree)
         for ref in item.dependency_evidence:
             record = AcceptanceRecord.model_validate_json(repo_path(run.repo_root, ref.path, ".json").read_text())
-            protected.extend(r.path for r in [ref, *record.checks, *record.reviews, *record.manual_validation])
+            protected.extend(r.path for r in [ref, *historical_evidence(run, record)])
         protected.extend([item.ticket_set.path, item.index.path,
                           *(t["artifact"]["path"] for t in payload["tickets"])])
     return protected

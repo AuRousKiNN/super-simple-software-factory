@@ -205,7 +205,7 @@ defaults:
 codex:
   auth: cli                         # 复用操作者的 Codex 登录
   approval_policy: never            # 不交互批准扩权，不代表跳过 sandbox
-  turn_timeout_s: 900
+  turn_timeout_s: 2400
   startup_timeout_s: 30
   shutdown_grace_s: 10
   command_network_access: false

@@ -33,7 +33,7 @@ def test_ticket_only_runs_full_chain_with_automatic_prerequisite(monkeypatch, re
     run = Flow(repo, [review()], name="downstream")
     monkeypatch.setattr(adw_build.session, "ensure", lambda *_: run)
     assert adw_build.main(BuildInput(ticket=second)) == 0
-    assert [p.owner for p, _ in run.calls] == ["scout", "builder", "reviewer", "documenter"]
+    assert [p.owner for p, _ in run.calls] == ["builder", "reviewer", "documenter"]
     snapshot = json.loads((run.session_dir / "delivery-input.json").read_text())
     assert snapshot["work_item"]["dependency_evidence"][0]["path"].startswith("sessions/flow/")
     assert git(repo, "status", "--porcelain") == ""
@@ -104,20 +104,37 @@ def test_preflight_rejection_has_no_agent_or_business_mutation(monkeypatch, repo
     assert json.loads((run.session_dir / "preflight-result.json").read_text())["status"] == "preflight_rejected"
 
 
-def test_scout_baseline_mutation_blocks_builder(monkeypatch, repo):
+def test_shared_documents_can_evolve_after_prerequisite_acceptance(repo):
+    from adw_modules import permissions
     set_path, _, second = ticket_plan(repo)
-    prerequisite(repo, set_path, "old", "2026-01-01T00:00:00+00:00")
-    run = setup_flow(monkeypatch, repo, [], adw_build)
-    original = run.call
-    def mutate(params, call):
-        result = original(params, call)
-        if params.owner == "scout":
-            (repo / "code.py").write_text("external edit")
-        return result
-    run.call = mutate
-    with pytest.raises(ValueError, match="uncommitted tracked"):
-        adw_build.main(BuildInput(ticket=second))
-    assert [p.owner for p, _ in run.calls] == ["scout"]
+    document = repo / "design.md"
+    document.write_text("Contract accepted at the original baseline")
+    git(repo, "add", "design.md")
+    git(repo, "commit", "-qm", "记录初始设计")
+    source, record, _ = prerequisite(repo, set_path, "old", "2026-01-01T00:00:00+00:00")
+    record.manual_validation = [tickets.artifact(repo, "design.md")]
+    receipt_path = source.session_dir / "ticket-acceptance.json"
+    tickets.atomic_json(receipt_path, record.model_dump())
+    order_path = source.session_dir / "ticket-acceptance-order.json"
+    order = history.AcceptanceOrder.model_validate_json(order_path.read_text())
+    receipt = tickets.artifact(repo, receipt_path.relative_to(repo).as_posix(), ".json")
+    tickets.atomic_json(order_path, order.model_copy(update={"receipt": receipt}).model_dump())
+    # A later accepted baseline may change the same document without invalidating history.
+    document.write_text("Contract plus new implementation details")
+    git(repo, "add", "design.md")
+    git(repo, "commit", "-qm", "更新共享设计")
+    run = Flow(repo, name="downstream")
+    item = tickets.ticket_work_item(run, None, second)
+    run.active_readonly_paths = tickets.validate_work_item(run, item)
+    from types import SimpleNamespace
+    agent = SimpleNamespace(name="builder", writes=None)
+    run.cfg.defaults.protected_files = []
+    assert permissions.permitted("design.md", agent, run.cfg, run)
+    assert not permissions.permitted(receipt.path, agent, run.cfg, run)
+    assert not permissions.permitted(record.checks[0].path, agent, run.cfg, run)
+    # Builder's in-flight edit also survives repeated target binding.
+    document.write_text("Next ticket updates its own section")
+    tickets.validate_work_item(run, item, check_tree=False)
 
 
 def test_explicit_old_history_migration_is_idempotent_and_keeps_receipts(repo):

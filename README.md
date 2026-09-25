@@ -130,7 +130,7 @@ defaults:
 codex:
   auth: cli
   approval_policy: never
-  turn_timeout_s: 900
+  turn_timeout_s: 2400
   startup_timeout_s: 30
   shutdown_grace_s: 10
   command_network_access: false
@@ -359,9 +359,9 @@ uv run adws/adw-simple-sdlc.py "实现登录限流" --spec specs/login-rate-limi
 文稿发布失败可重放，已发布历史不可覆盖。详见
 [合同与恢复命令](.agents/skills/sssf/references/spec-artifacts.md)。
 
-先前证据不要求与当前 HEAD 完全一致。多个前置票据可以使用不同提交上的验收记录，
-使用先前证据前，由一个只读 scout 简单调查相关代码、测试、配置和环境是否仍适用；
-无关改动本身不使证据过时。scout 判定已过时或无法确认时，ADW 直接返回临时调查结果并立即失败，
-不进入 builder、质量检查或 reviewer，也不自动补验。builder/reviewer 不重复判断证据新鲜度。
-证据哈希、目标定义和必需检查仍受校验。
+普通票据交付只检查前置票据是否已有当前定义下的成功验收记录，然后进入 builder，
+不再默认启动证据 scout。历史验收记录和 session 内报告保持不可变；它们引用的源码、
+测试和业务文档允许后续票据继续修改，旧哈希只描述当时的验收基线。
+当前检查、独立 reviewer 和最终集成验收负责验证后续变更。显式 recheck 仍保留针对
+所提供证据的 scout 复核。票据定义、历史记录完整性和必需检查仍受校验。
 重验会更新规格 README、执行记录和索引，并回写本次范围验收结果；成功的票据重验仅提交这些文档，按最终 HEAD 签发票据验收。历史失败记录保留，票据通过不代表整个规格通过。

@@ -11,7 +11,7 @@ Low-level behavior belongs in `adws/adw_modules/`. Keep ADW entry points thin.
 | `codex_schema.py` | verified Pydantic-to-runtime schema subset |
 | `spec_artifacts.py` | spec identity, dual-draft publication, facts, recovery and indexes |
 | `tickets.py` | planning metadata, indexes, evidence, work-item binding |
-| `evidence_freshness.py` | single-scout prior-evidence investigation and immediate rejection |
+| `evidence_freshness.py` | explicit recheck prior-evidence investigation |
 | `permissions.py` | content snapshots, write contracts, safe restoration |
 | `runner.py` | phase lifecycle, atomic thread mapping, totals, finish verdict |
 | `session.py` | session creation, recovery, signals, runtime shutdown |

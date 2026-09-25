@@ -474,3 +474,12 @@ def test_agent_map_is_schema_v2_and_saved_atomically(tmp_path: Path) -> None:
     run._agent_map_path.write_text(json.dumps({"builder": {"session_id": "old"}}))
     with pytest.raises(RuntimeError, match="schema_version=2"):
         Run._load_agent_map(run)
+
+
+def test_default_turn_timeout_is_forty_minutes():
+    from adw_modules.data_types import CodexRuntimeConfig
+    import yaml
+    assert CodexRuntimeConfig().turn_timeout_s == 2400
+    config = yaml.safe_load((ROOT / ".agents/skills/sssf/templates/sssf.config.yaml").read_text())
+    assert config["codex"]["turn_timeout_s"] == 2400
+    assert CodexRuntimeConfig(turn_timeout_s=10).turn_timeout_s == 10

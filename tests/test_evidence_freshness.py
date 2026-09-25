@@ -1,4 +1,4 @@
-"""Prior evidence is decided once by scout; rejection must stop downstream work."""
+"""Ordinary delivery skips scout; explicit recheck retains evidence investigation."""
 import json
 import sys
 from pathlib import Path
@@ -16,41 +16,20 @@ from test_review_routing import Flow, review, source_receipt
 from test_tickets import git, phase, repo, run_for
 
 
-@pytest.mark.parametrize("verdict", ["stale", "uncertain", "applicable"])
-def test_ticket_dependency_scout_decides_before_builder(monkeypatch, repo, verdict):
+def test_ticket_dependency_starts_builder_without_scout(monkeypatch, repo):
     source, result, set_path, first, second = build_ticket(monkeypatch, repo)
     assert result == 0
     (repo / "unrelated.py").write_text("unrelated = True\n")
     git(repo, "add", "unrelated.py")
     git(repo, "commit", "-qm", "添加无关功能")
-    ref = tickets.artifact(repo, (source.session_dir / "ticket-acceptance.json").relative_to(repo).as_posix(), ".json")
-    manifest = source.session_dir / "dependencies.json"
-    manifest.write_text(json.dumps([ref.model_dump()]))
     run = Flow(repo, [review()], name="downstream")
-    run.freshness_verdict = verdict
     monkeypatch.setattr(adw_build.session, "ensure", lambda *_: run)
-    original = (repo / "code.py").read_bytes()
-    head = git(repo, "rev-parse", "HEAD")
-    result = adw_build.main(BuildInput(ticket=second, ticket_set=set_path,
-                                      dependency_evidence=manifest.relative_to(repo).as_posix()))
-    assert not (run.session_dir / "evidence-freshness.json").exists()
-    assert not (run.context_handoff_dir / "scout_findings.md").exists()
-    assert not any(p.params.name == "evidence_freshness" for p in run.phases)
-    assert run.closed
-    if verdict == "applicable":
-        assert result == 0
-        assert [p.owner for p, c in run.calls] == ["scout", "builder", "reviewer", "documenter"]
-        for params, call in run.calls:
-            if params.owner in {"builder", "reviewer"}:
-                assert "decided by scout" in call.previous.notes_for_next_agent
-    else:
-        assert result == 1 and not run.accepted
-        assert [p.owner for p, c in run.calls] == ["scout"]
-        assert not any(p.params.owner == "quality" for p in run.phases)
-        assert ref.path in run.reason and verdict in run.reason
-        assert (repo / "code.py").read_bytes() == original
-        assert git(repo, "rev-parse", "HEAD") == head
-        assert not (run.session_dir / "ticket-acceptance.json").exists()
+    def forbidden(*args, **kwargs):
+        raise AssertionError("ordinary delivery must not investigate prior evidence")
+    monkeypatch.setattr(evidence_freshness, "inspect", forbidden)
+    assert adw_build.main(BuildInput(ticket=second)) == 0
+    assert [p.owner for p, c in run.calls] == ["builder", "reviewer", "documenter"]
+    assert run.closed and run.accepted
 
 
 @pytest.mark.parametrize("verdict", ["stale", "uncertain", "applicable"])

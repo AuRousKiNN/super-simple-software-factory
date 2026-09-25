@@ -1,4 +1,4 @@
-"""Scout-owned applicability of prior evidence, before any delivery/recheck work."""
+"""Scout-owned applicability of evidence supplied to an explicit recheck."""
 from __future__ import annotations
 
 import json

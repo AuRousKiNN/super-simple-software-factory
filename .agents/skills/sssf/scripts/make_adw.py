@@ -177,8 +177,6 @@ def main() -> int:
 
     chain = []
     for agent in agent_names:
-        if agent == "builder":
-            chain.append("[scout(evidence freshness)]")
         chain.append(agent)
         if agent == "builder":
             chain.extend(["code(checks)", "reviewer", "bounded repair", "documenter", "commit", "finish/acceptance"])
@@ -190,7 +188,7 @@ def main() -> int:
         chain=" -> ".join(chain),
         imports=", ".join(sorted(set(types) | {"PlanOutput"})),
         prompt_expression=("args.prompt" if "decomposer" in agent_names and "planner" not in agent_names[:agent_names.index("decomposer")] else "utils.resolve_prompt(args.prompt)"),
-        agents_list=repr(sorted(set(agent_names) | ({"scout", "reviewer", "documenter"} if "builder" in agent_names else set()))),
+        agents_list=repr(sorted(set(agent_names) | ({"reviewer", "documenter"} if "builder" in agent_names else set()))),
         build_base=(('    delivery.preflight(run)\n' if "builder" in agent_names else '') + '    build_base = git_helper.rev("HEAD")'
                     if any(a in agent_names for a in ("builder", "reviewer", "documenter")) else ""),
         phases="\n".join(phases),

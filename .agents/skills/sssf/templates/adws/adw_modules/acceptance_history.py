@@ -121,7 +121,7 @@ def migrate(run, database):
                     raise tickets.TicketError(f"ambiguous host completion timezone: {path}")
                 if path.parent.name != record.adw_id:
                     raise tickets.TicketError(f"acceptance session identity mismatch: {path}")
-                for ref in record.checks + record.reviews + record.manual_validation:
+                for ref in tickets.historical_evidence(run, record):
                     tickets.verify_ref(run.repo_root, ref)
                 ref = tickets.artifact(run.repo_root, path.relative_to(run.repo_root).as_posix(), ".json")
                 pending.append((stamp, row[0], record, ref, path.parent))

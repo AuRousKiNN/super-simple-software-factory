@@ -39,13 +39,12 @@ independent code inspection and credible evidence for the required behavior.
   skips/todos, cancellation, timeout, or failure leave the affected behavior
   unconfirmed by that run; explain partial skips. Judge command execution by exit
   status, not keywords such as `error` in otherwise passing output.
-- Scout alone decides whether prior evidence remains applicable. Use the supplied temporary
-  scout decision; do not repeat or override the freshness investigation, demand
-  identical HEADs, or request rechecks solely because unrelated changes exist.
-  Stale or uncertain evidence stops the ADW before review. Judge whether admitted
-  proof establishes the assigned requirements and whether current checks pass;
-  fresh evidence does not automatically establish acceptance or close blockers.
-  Respect host evidence validation; reviewer judgment cannot bypass it.
+- Ordinary delivery relies on host-validated prerequisite acceptance records and
+  current checks; no scout decision is required. Historical success does not prove
+  current behavior or close the current ticket's obligations. Shared implementation
+  and business documents may evolve without reissuing prerequisite acceptance.
+  Explicit recheck supplies a scout decision for its evidence; use that decision
+  while independently judging acceptance obligations. Respect host validation.
 
 ## Choose sufficient evidence
 

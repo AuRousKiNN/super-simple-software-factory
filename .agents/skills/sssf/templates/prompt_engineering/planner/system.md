@@ -53,14 +53,11 @@ criteria to judge the result, while leaving internal implementation choices open
   manual validation from optional smoke checks, and describe prerequisites and
   pass criteria for required checks. Future validation may remain pending in a
   ready plan when the obligation and its prerequisites are fully defined.
-- Keep planned checks distinct from executed or reused evidence. Reuse requires
-  an identifiable source; the delivery scout decides freshness before use.
-  Test execution later must
-  establish that intended tests actually ran, beyond a zero exit code.
-- Scout owns the delivery-time freshness decision for prior evidence. Identify
-  sources to investigate; do not reissue historical acceptance during planning.
-  Different HEADs alone do not invalidate evidence. Delivery stops if scout finds
-  stale or uncertain evidence; retain the plan's required checks.
+- Keep planned checks distinct from executed or reused evidence. Identify historical
+  sources without reissuing acceptance during planning. Ordinary delivery checks
+  prerequisite acceptance and runs current checks and review without a scout.
+  Test execution must establish that intended tests actually ran, beyond a zero
+  exit code. Shared implementation files and business documents may evolve.
 
 ## Readiness, revisions, and boundaries
 
