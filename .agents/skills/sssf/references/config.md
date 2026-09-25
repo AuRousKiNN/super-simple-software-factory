@@ -25,14 +25,24 @@ replace rather than append.
 | Field | Values/default | Meaning |
 |---|---|---|
 | `auth` | `cli` or `api_key` | operator login or unattended key mode |
-| `approval_policy` | `never` | no interactive elevation prompt |
+| `approval_mode` | `auto_review` | Approve for me for every role; SDK uses on-request approvals with an automatic reviewer |
 | `turn_timeout_s` | `2400` | total turn deadline |
 | `startup_timeout_s` | `30` | runtime startup deadline |
 | `shutdown_grace_s` | `10` | cancellation/close grace period |
 | `command_network_access` | `false` | command network remains disabled |
 
-`approval_policy: never` does not disable the sandbox. An operation requiring
-more authority returns `approval_required` instead of waiting for input.
+`approval_mode: auto_review` keeps the sandbox and lets the runtime review
+requests to cross its boundary. It does not grant blanket network or filesystem
+access. The SDK applies `approval_policy=on-request` and
+`approvals_reviewer=auto_review` on creation, resume and each turn; SSSF does not
+approve requests itself or fall back to full access. Denials and unavailable
+approval services remain blockers. Recon child roles declare the same approval
+policy/reviewer while retaining their read-only sandbox and bounded task.
+
+The old `approval_policy` key is rejected. Existing installations must replace it
+with `approval_mode: auto_review` and update the managed runtime and child role
+before starting a new session. Changing the permission policy invalidates old
+session fingerprints; never edit historical mappings to resume them.
 
 ## Reasoning effort
 

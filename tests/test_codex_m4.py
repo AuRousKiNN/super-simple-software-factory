@@ -77,7 +77,7 @@ def test_fresh_install_is_repeatable_and_records_manifest(tmp_path: Path) -> Non
     assert first.returncode == 0, first.stderr + first.stdout
     manifest_path = target / ".sssf/manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    assert manifest["distribution_version"] == "ticket-launch-v1-codex-sdk-0.155.1"
+    assert manifest["distribution_version"] == "auto-review-v1-codex-sdk-0.155.1"
     assert (target / "adws/adw_modules/agents.py").is_file()
     assert not (target / "adws/adw_modules/agents_codex.py").exists()
     assert not (target / "adws/adw_data/harness_engineering").exists()

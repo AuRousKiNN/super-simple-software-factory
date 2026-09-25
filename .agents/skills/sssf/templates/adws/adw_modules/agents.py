@@ -98,7 +98,10 @@ def validate(cfg: SSSFConfig, required: list[str]) -> None:
             "defaults.subagents.enabled must be false; enable only planner/scout/decomposer explicitly"
         )
     if cfg.codex.command_network_access:
-        problems.append("codex.command_network_access=true is not supported in M1")
+        problems.append(
+            "codex.command_network_access=true is unsupported; "
+            "use auto_review for approval of sandbox-boundary requests"
+        )
     checked_role_files: set[str] = set()
     for configured in cfg.agents:
         if not configured.subagents.enabled:
@@ -160,6 +163,13 @@ def _subagent_role_problems(agent: AgentConfig) -> list[str]:
     if payload.get("sandbox_mode") != "read-only":
         problems.append(
             f"agent {agent.name!r}: subagent role {policy.role!r} must use read-only sandbox"
+        )
+    if (payload.get("approval_policy"), payload.get("approvals_reviewer")) != (
+        "on-request", "auto_review",
+    ):
+        problems.append(
+            f"agent {agent.name!r}: subagent role {policy.role!r} must use "
+            "approval_policy=on-request and approvals_reviewer=auto_review"
         )
     child_agents = payload.get("agents") or {}
     if not isinstance(child_agents, dict) or child_agents.get("enabled") is not False:

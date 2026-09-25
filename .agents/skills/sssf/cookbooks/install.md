@@ -65,6 +65,24 @@ uv run adws/adw-prompt.py "summarize this repo" --agent scout
 A green smoke means config preflight, thread creation, structured output,
 permissions, gates, and SQLite tracing all completed.
 
+## Upgrading to Approve for me
+
+Update managed runtime modules and the managed `sssf_recon` role with the
+installer. It preserves the user-owned roster. In the installed YAML, replace
+`codex.approval_policy: never` with `codex.approval_mode: auto_review`, retaining
+all models, role prompts, write contracts and project-specific checks. The old
+key is rejected rather than silently continuing with denied approvals.
+
+All roles now use SDK `ApprovalMode.auto_review` on start, resume and each turn.
+Recon children explicitly select on-request approvals and the automatic reviewer
+with their read-only sandbox. Command network access inside the sandbox remains
+disabled; the runtime reviews requested exceptions. Do not add a local approval
+handler that unconditionally accepts requests.
+
+Start a new session after this policy change. Existing mappings include the
+runtime configuration fingerprint and must not be rewritten to force a resume.
+This upgrade requires no trace schema change and never rewrites old run records.
+
 ## Upgrading to ticket decomposition
 
 The installer preserves existing roster, prompts and starter ADWs. It ships new

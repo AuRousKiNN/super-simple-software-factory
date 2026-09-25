@@ -129,7 +129,7 @@ defaults:
 
 codex:
   auth: cli
-  approval_policy: never
+  approval_mode: auto_review
   turn_timeout_s: 2400
   startup_timeout_s: 30
   shutdown_grace_s: 10
@@ -155,6 +155,14 @@ contract, separate from the Codex sandbox:
 The current invocation's report directory and `context_handoff/` are narrow
 runtime exceptions. Being under `data_dir` does not otherwise grant write
 permission.
+
+All roles use `codex.approval_mode: auto_review` (Approve for me). The SDK
+requests approval on demand and routes it to the automatic reviewer on thread
+creation, resume, and every turn. Recon children use the same approval mode with
+their read-only sandbox. Repository `writes` contracts still apply. Sandboxed
+command network access stays disabled; approved escalations may cross that
+boundary, while denied requests remain denied. See the
+[existing-install upgrade](.agents/skills/sssf/cookbooks/install.md#upgrading-to-approve-for-me).
 
 CLI authentication is the default and needs no secret in `.env`. For unattended
 execution, select `codex.auth: api_key` and set `OPENAI_API_KEY`. Secrets are not

@@ -180,7 +180,10 @@ class CodexRuntime:
             on_exit=on_process_exit,
         )
         if self.config.command_network_access:
-            raise ValueError("command_network_access=true is not supported in M1")
+            raise ValueError(
+                "command_network_access=true is unsupported; "
+                "use auto_review for approval of sandbox-boundary requests"
+            )
 
     def _ensure_client(self) -> Any:
         if self._closed:
@@ -293,7 +296,7 @@ class CodexRuntime:
             elif request.thread_id:
                 thread = codex.thread_resume(
                     request.thread_id,
-                    approval_mode=ApprovalMode.deny_all,
+                    approval_mode=ApprovalMode(self.config.approval_mode),
                     config=_thread_config(request.subagents),
                     cwd=request.cwd,
                     developer_instructions=request.developer_instructions,
@@ -303,7 +306,7 @@ class CodexRuntime:
                 self._threads[thread.id] = thread
             else:
                 thread = codex.thread_start(
-                    approval_mode=ApprovalMode.deny_all,
+                    approval_mode=ApprovalMode(self.config.approval_mode),
                     config=_thread_config(request.subagents),
                     cwd=request.cwd,
                     developer_instructions=request.developer_instructions,
@@ -324,6 +327,7 @@ class CodexRuntime:
 
             handle = thread.turn(
                 request.prompt,
+                approval_mode=ApprovalMode(self.config.approval_mode),
                 effort=request.effort,
                 output_schema=request.output_schema,
                 sandbox=Sandbox.workspace_write,

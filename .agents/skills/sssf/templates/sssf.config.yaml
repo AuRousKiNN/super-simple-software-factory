@@ -28,7 +28,7 @@ defaults:
 
 codex:
   auth: cli                        # reuse the operator's Codex login; api_key is optional
-  approval_policy: never           # no interactive elevation; sandbox remains enabled
+  approval_mode: auto_review       # Approve for me for every role; sandbox remains enabled
   turn_timeout_s: 2400
   startup_timeout_s: 30
   shutdown_grace_s: 10

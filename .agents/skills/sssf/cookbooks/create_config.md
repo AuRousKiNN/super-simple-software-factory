@@ -28,7 +28,7 @@ defaults:
 
 codex:
   auth: cli
-  approval_policy: never
+  approval_mode: auto_review
   turn_timeout_s: 2400
   startup_timeout_s: 30
   shutdown_grace_s: 10

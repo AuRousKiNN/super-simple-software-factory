@@ -29,7 +29,7 @@ from typing import Literal
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 SSSF_SKILL = Path(__file__).resolve().parent.parent / "SKILL.md"
-DISTRIBUTION_VERSION = "ticket-launch-v1-codex-sdk-0.155.1"
+DISTRIBUTION_VERSION = "auto-review-v1-codex-sdk-0.155.1"
 MANIFEST_PATH = Path(".sssf/manifest.json")
 BACKUP_ROOT = Path(".sssf/backups")
 
@@ -550,6 +550,8 @@ def main(argv: list[str] | None = None) -> int:
     for relative in preserved:
         print(f"  = kept {relative}")
     print(f"  rollback snapshot: {snapshot_id}")
+    print("\napproval upgrade: replace preserved codex.approval_policy with approval_mode: auto_review.")
+    print("  All roles use Approve for me; keep write contracts and start a new session.")
     print("\nspec artifact upgrade: merge --spec-dir/--spec targets, DocumentDraftOutput and host publication.")
     print("  Documenter writes only invocation reports; remove standalone document workflows.")
     print("\nautomatic ticket upgrade: merge adw-build to delivery.launch; --ticket alone resolves dependencies.")

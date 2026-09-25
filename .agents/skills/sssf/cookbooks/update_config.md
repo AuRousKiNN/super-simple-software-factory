@@ -54,5 +54,13 @@ children investigate read-only; the parent owns planning writes.
 ## Authentication and network
 
 Use `codex.auth: cli` for an operator session. For unattended execution choose
-`api_key` and provide `OPENAI_API_KEY` outside the YAML. Command network access
-is disabled in the current release and `approval_policy` is non-interactive.
+`api_key` and provide `OPENAI_API_KEY` outside the YAML. All roles use
+`codex.approval_mode: auto_review` (Approve for me). The SDK sets on-request
+approvals and the automatic reviewer on new threads, resumed threads and turns.
+Sandboxed command network access remains disabled; agents may request approval
+for operations such as local HTTP test servers. Approval is decided by the
+runtime, and availability depends on its account and managed policy. Do not
+replace denied or unavailable review with full access or a local allow-all handler.
+Recon children declare `approval_policy = "on-request"` and
+`approvals_reviewer = "auto_review"` in their role file while remaining read-only.
+See the [existing-install upgrade](install.md#upgrading-to-approve-for-me).

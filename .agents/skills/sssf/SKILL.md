@@ -122,7 +122,8 @@ Deep references: [configuration](references/config.md),
 ## Runtime version
 
 Every shipped and generated ADW pins `openai-codex==0.155.1`. Models and
-reasoning efforts are preflighted. Authentication, model, approval, timeout,
+reasoning efforts are preflighted. All roles use SDK auto-review (Approve for me)
+for sandbox-boundary requests. Authentication, model, approval, timeout,
 interruption, and runtime errors remain distinct outcomes. Cost and context
 occupancy remain unknown when the runtime does not publish authoritative data.
 
