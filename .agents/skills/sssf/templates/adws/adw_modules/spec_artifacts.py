@@ -617,7 +617,7 @@ def ticket_accepted(run, item, receipt: ArtifactRef) -> None:
         if saved.get("state") == "synced" and saved.get("accepted") and saved.get("accepts_scope"):
             # The owning delivery already published and committed this scope's facts.
             # Keep the dependency receipt in the session; another docs commit would
-            # immediately invalidate its exact-HEAD baseline.
+            # change the recorded observation after acceptance publication.
             tickets.atomic_json(run.session_dir / "ticket-facts.json", {
                 "state": "synced", "receipt": receipt.model_dump(), "spec": item.spec.model_dump()})
             return

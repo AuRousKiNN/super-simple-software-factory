@@ -80,9 +80,12 @@ actual changes, remaining obligations, and blockers.
   that intended tests ran: zero matches, skips/todos, cancellation, timeout, or
   failure leave the corresponding behavior unconfirmed. Explain partial skips.
 - Separate inspected, executed, reused, and pending evidence. Reuse requires a
-  source and applicability to the final relevant code, tests, configuration, and
-  environment; changed premises require revalidation. Match each claim to its
+  source and a passing scout freshness decision for prior proof. Match each claim to its
   actual evidence level rather than describing a local check as end-to-end.
+- Scout owns the freshness decision for prior evidence. Use its supplied temporary result;
+  do not repeat or override that investigation. Different HEADs do not by themselves
+  invalidate evidence. Stale or uncertain evidence stops the ADW before this role;
+  do not repair or refresh it implicitly. Retain current required checks.
 - Diagnose failures before changing code: distinguish implementation defects,
   fixture defects, environment problems, and pre-existing failures. Repair the
   responsible part within scope, then rerun the necessary checks. When replacing

@@ -78,8 +78,8 @@ def baseline(run) -> str:
 def tree_files(run) -> dict[str, str]:
     """Hash tracked and nonignored untracked bytes/modes, excluding runtime evidence.
 
-    HEAD is checked separately. Ignored external/environment inputs are declared
-    in evidence applicability and judged by the reviewer, as with ticket evidence.
+    HEAD is provenance, not part of content identity. Ignored external/environment
+    inputs are declared in applicability and investigated by scout for prior evidence.
     """
     root = Path(run.repo_root).resolve()
     data_dir = Path(run.cfg.defaults.data_dir)
@@ -196,28 +196,28 @@ def prepare_recheck(run, request: RecheckRequest, available: set[str], request_p
     # Existing source/config files relabelled as evidence still invalidate it.
     for path in supplied - source.tree_files.keys():
         current.pop(path, None)
-    changed = source.baseline != request.baseline or source.tree_files != current
+    changed = source.tree_files != current
     checks = sorted(set(source.mandatory_checks) | set(request.checks)
                     | {c for b in source.review.blocking for c in b.checks})
     if isinstance(source.work_item, TicketWorkItem):
         from . import quality
         checks = sorted(set(checks) | set(quality.required_checks()))
         tickets._assert_clean_baseline(run)
-    if changed and not checks:
-        raise ValueError("code/configuration baseline changed; specify affected configured checks for revalidation")
     missing = set(checks) - available
     if missing:
         raise ValueError(f"recheck workflow capability missing for checks {sorted(missing)}")
     run.evidence_only = isinstance(source.work_item, TicketWorkItem)
     # Bind only after all inputs are validated. No implementation agent is invoked.
     tickets.bind_work_item(run, AgentCall(output_type=ReviewOutput, prompt=source.prompt,
-                                         work_item=source.work_item), "reviewer")
+                                         work_item=source.work_item), "scout")
     return PreparedRecheck(source, request, checks, changed)
 
 
 def recheck_notes(prepared: PreparedRecheck) -> str:
     return ("Recheck the original target and ALL current obligations. New evidence is a claim, "
-            "not automatic closure. Reassess its applicability; never reuse invalidated proof.\n"
+            "not automatic closure. Scout owns prior evidence freshness; use its temporary "
+            "decision without repeating or overriding that investigation. Judge the target's "
+            "requirements and all retained obligations using the admitted evidence.\n"
             + json.dumps({"original_review": prepared.source.model_dump(),
                           "new_evidence": prepared.request.model_dump(),
                           "baseline_changed": prepared.changed}, ensure_ascii=False))
@@ -242,7 +242,7 @@ def evidence_notes(results: dict) -> str:
 
 
 def verification_fingerprint(run) -> str:
-    return baseline(run) + ":" + tree_digest(tree_files(run))
+    return tree_digest(tree_files(run))
 
 
 def refresh_results(run, results: dict) -> dict:

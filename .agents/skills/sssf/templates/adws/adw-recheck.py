@@ -7,7 +7,7 @@
 Usage:
     uv run adws/adw-recheck.py path/to/recheck.json [--config adws/adw_sssf_config/sssf.config.yaml]
 
-Phases: code(recheck_input) -> [code(checks)] -> code(changes) -> reviewer -> code(route)
+Phases: code(recheck_input) -> scout(evidence freshness) -> [code(checks)] -> code(changes) -> reviewer -> code(route)
         -> [code(checks) -> code(changes) -> reviewer -> code(route)] bounded
 
 Always creates a new session without a builder. Ticket mode reruns required checks,
@@ -17,10 +17,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from adw_modules import delivery, agents, changes, gates, quality, review_routing, session, spec_artifacts, tickets
+from adw_modules import delivery, agents, changes, evidence_freshness, gates, quality, review_routing, session, spec_artifacts, tickets
 from adw_modules.data_types import TicketWorkItem, AgentCall, ChangeCapture, DocumentRequest, PhaseParams, RecheckRequest, ReviewOutput
 
-REQUIRED_AGENTS = ["reviewer", "documenter"]
+REQUIRED_AGENTS = ["scout", "reviewer", "documenter"]
 MAX_VERIFICATION_LOOPS = 2
 
 
@@ -34,6 +34,13 @@ def main(request_path: str, config: str = "adws/adw_sssf_config/sssf.config.yaml
         prepared = review_routing.prepare_recheck(run, request, quality.configured_checks(), Path(request_path))
         ph.log(original_review=request.original_review.model_dump(), baseline=request.baseline,
                changed=prepared.changed, checks=prepared.checks)
+
+    freshness = evidence_freshness.inspect(run,
+        [request.original_review, *evidence_freshness.dependency_refs(prepared.source.work_item),
+         *(e.artifact for e in request.evidence)], prepared.source.work_item)
+    reason = evidence_freshness.failure_reason(freshness)
+    if reason:
+        return run.finish(accepted=False, reason=reason)
 
     previous_review = prepared.source.review
     results = {}
@@ -56,7 +63,8 @@ def main(request_path: str, config: str = "adws/adw_sssf_config/sssf.config.yaml
             results = review_routing.refresh_results(run, results)
             changeset = changes.capture(run, ChangeCapture(base=prepared.source.build_base))
             previous = changes.as_envelope(changeset, review_routing.recheck_notes(prepared)
-                                            + "\n" + review_routing.evidence_notes(results))
+                                            + "\n" + review_routing.evidence_notes(results)
+                                            + "\n" + evidence_freshness.notes(freshness))
             ph.log(diff=changeset.diff_path)
         with run.phase(PhaseParams(name=f"review_{round_number}", kind="agent", owner="reviewer", retries=1,
                                    description="Reassess all assigned obligations using the newly supplied evidence")) as ph:

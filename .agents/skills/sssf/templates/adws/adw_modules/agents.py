@@ -222,8 +222,16 @@ def execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
 def _execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
     """Render prompts, run bounded Codex turns, validate gates, return envelope."""
     from . import spec_artifacts
-    from .data_types import DocumentDraftOutput, PlanOutput
+    from .data_types import DocumentDraftOutput, EvidenceScoutOutput, PlanOutput
     agent = resolve(run.cfg, phase.params.owner)
+    if call.output_type is EvidenceScoutOutput:
+        if agent.name != "scout":
+            raise ValueError("evidence freshness requires scout")
+        # A brief investigation is always one read-only scout, even if the
+        # general scout roster allows children or broader writes. Use a distinct
+        # thread identity so a preceding general scout keeps its original policy.
+        agent = agent.model_copy(update={"name": "evidence_scout", "writes": [], "subagents":
+            agent.subagents.model_copy(update={"enabled": False})})
     spec_path = None
     if agent.name == "planner":
         if call.planning_target is None or call.output_type is not PlanOutput:
@@ -271,6 +279,7 @@ def _execute(run, phase: Phase, call: AgentCall) -> EnvelopeBase:
 
     variables = {
         "prompt": call.prompt,
+        "output_type": call.output_type.__name__,
         "spec_path": spec_path or "(none)",
         "document_context": call.document_context.model_dump_json(indent=2) if call.document_context else "(none)",
         "work_item": item.model_dump_json(indent=2) if item else "(none; use the direct request)",
@@ -789,7 +798,7 @@ def _persist_envelope(
     if envelope:
         record = {
             "agent_name": agent_name,
-            "purpose": resolve(run.cfg, agent_name).purpose,
+            "purpose": resolve(run.cfg, phase.params.owner).purpose,
             "output_type": call.output_type.__name__,
             "attempt": attempt,
             **envelope.model_dump(),

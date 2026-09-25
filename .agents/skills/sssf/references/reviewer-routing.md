@@ -108,17 +108,23 @@ uv run adws/adw-recheck.py recheck.json --config adws/adw_sssf_config/sssf.confi
 
 This entry always creates a new session, validates the source receipt/target
 identity/definition hashes, current HEAD, evidence hashes and blocker references,
-then executes required configured checks and reviews. It never starts a builder.
-New evidence and request files alone do not invalidate code; rewriting existing
-implementation/configuration files does. If HEAD or tracked/nonignored code
-changes, affected configured checks must be supplied. The reviewer must reassess
-all inherited obligations and evidence applicability even when code is unchanged.
-Ignored external/environment inputs are covered by explicit applicability claims
-and independent review, not by the Git file fingerprint.
+then runs one brief read-only scout investigation before checks or review. The
+scout assesses the original review, dependency records and supplied evidence against
+relevant code, tests, shared dependencies, configuration and environment. HEAD or
+whole-tree changes alone do not establish staleness. Historical failed/pending
+obligations remain context, not claims of success. The host consumes the temporary
+inline decision without writing `evidence-freshness.json` or a scout Markdown report;
+normal runtime tracing remains. A stale or uncertain verdict immediately
+finishes with accepted=false and exit code 1, returning paths and reasons; no checks,
+builder, reviewer, documenter or automatic refresh follows. When all evidence is
+applicable, configured checks and review proceed. The reviewer uses scout's decision
+without repeating freshness judgment and still reviews all acceptance obligations.
 
-A ticket recheck accepts both blocked and approved source reviews. It retains exact
-HEAD dependency rules: supply refreshed `dependency_evidence` in the JSON request
-when prerequisites were revalidated. Run prerequisite rechecks in topological order.
+A ticket recheck accepts both blocked and approved source reviews. Prerequisite
+records may come from different HEADs when their evidence still applies. Supply
+refreshed `dependency_evidence` when affected prerequisites need revalidation, in
+topological order in separately requested work. Scout alone decides applicability;
+unrelated commits are not grounds to reject or reissue prior evidence.
 An approved source may use `evidence: []`; every applicable check is rerun and the
 reviewer reassesses all obligations. Successful ticket recheck records documentation inside the session, leaves HEAD
 unchanged, finishes and publishes a new current-baseline ticket acceptance. It never resumes
@@ -126,7 +132,11 @@ an old program counter or promotes a ticket to whole-spec integration acceptance
 
 ## Existing installations
 
-Install/update retains customized prompts, ADWs and quality.py. Explicitly merge
+Install/update retains customized prompts, ADWs and quality.py. Build/recheck now
+require the existing `scout` roster entry; merge the scout system/user templates and
+entrypoint changes too. Evidence investigation uses `EvidenceScoutOutput`, a separate
+`evidence_scout` runtime identity, and enforces no children and read-only writes
+without altering the general scout configuration. Explicitly merge
 ReviewOutput, reviewer system/user/report examples, verdict gates, review call
 sites, routing branches and quality registry together. Existing string blockers
 are not accepted by the new contract. No runtime/SQLite schema bump, importer or
@@ -139,5 +149,9 @@ implementation diffs are valid and never fall back to the preceding commit.
 Generated documentation and recheck acceptance do not independently establish
 whole-spec integration acceptance. See [spec artifacts](spec-artifacts.md).
 
-票据重验的文档保存在会话目录中，不修改规格目录或创建提交。这样多个前置票据可以在
-同一个 HEAD 上重新验收，并共同作为下游依赖证据。正常 build 仍发布并提交规格执行文档。
+先前证据不要求与当前 HEAD 完全一致。多个前置票据可以使用不同提交上的验收记录，
+使用先前证据前，由一个只读 scout 简单调查相关代码、测试、配置和环境是否仍适用；
+无关改动本身不使证据过时。scout 判定已过时或无法确认时，ADW 直接返回临时调查结果并立即失败，
+不进入 builder、质量检查或 reviewer，也不自动补验。builder/reviewer 不重复判断证据新鲜度。
+证据哈希、目标定义和必需检查仍受校验。
+票据重验文档保存在会话目录中，不创建提交；正常 build 仍发布并提交规格执行文档。

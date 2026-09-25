@@ -139,7 +139,7 @@ class DecompositionInput(BaseModel):
 
 
 class AcceptanceRecord(BaseModel):
-    """Host-issued, conservative evidence valid on one implementation baseline."""
+    """Host-issued evidence with its observed baseline and applicability."""
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1] = 1
     accepted: Literal[True] = True
@@ -166,6 +166,21 @@ class ScoutFinding(BaseModel):
 
 class ScoutOutput(EnvelopeBase):
     findings: list[ScoutFinding] = Field(default_factory=list)
+
+
+class EvidenceAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Keep the model inside the SDK schema subset; the coverage gate checks
+    # exact host-supplied paths/hashes and nonblank reasons.
+    path: str
+    sha256: str
+    verdict: Literal["applicable", "stale", "uncertain"]
+    reason: str
+
+
+class EvidenceScoutOutput(ScoutOutput):
+    """One bounded scout investigation; stale/uncertain evidence stops the ADW."""
+    assessments: list[EvidenceAssessment]
 
 
 class ReviewFinding(BaseModel):

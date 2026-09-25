@@ -230,10 +230,9 @@ def _verify_evidence(run, item: TicketWorkItem, payload: dict, check_tree: bool 
             raise TicketError("duplicate dependency evidence")
         if record.definition_sha256 != payload["definition_sha256"]:
             raise TicketError(f"stale dependency definition: {record.ticket_id}")
-        # Core deliberately accepts only an exact baseline. An ADW can revalidate
-        # older evidence and issue a new record for the current baseline.
-        if record.baseline != _git(run.repo_root, "rev-parse", "HEAD"):
-            raise TicketError(f"dependency baseline needs revalidation: {record.ticket_id}")
+        # Baseline records provenance, not an exact-HEAD reuse requirement.
+        # The evidence scout assesses whether intervening changes affect the
+        # prerequisite's code, tests, configuration or environment.
         for evidence in record.checks + record.reviews + record.manual_validation:
             verify_ref(run.repo_root, evidence)
         records[record.ticket_id] = record

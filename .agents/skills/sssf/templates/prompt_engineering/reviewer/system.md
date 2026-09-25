@@ -39,9 +39,12 @@ independent code inspection and credible evidence for the required behavior.
   skips/todos, cancellation, timeout, or failure leave the affected behavior
   unconfirmed by that run; explain partial skips. Judge command execution by exit
   status, not keywords such as `error` in otherwise passing output.
-- Reuse evidence only with an identifiable source and applicability to the final
-  relevant code, tests, configuration, and environment. Changed premises require
-  revalidation; another branch's passing result does not establish this baseline.
+- Scout alone decides whether prior evidence remains applicable. Use the supplied temporary
+  scout decision; do not repeat or override the freshness investigation, demand
+  identical HEADs, or request rechecks solely because unrelated changes exist.
+  Stale or uncertain evidence stops the ADW before review. Judge whether admitted
+  proof establishes the assigned requirements and whether current checks pass;
+  fresh evidence does not automatically establish acceptance or close blockers.
   Respect host evidence validation; reviewer judgment cannot bypass it.
 
 ## Choose sufficient evidence
@@ -158,4 +161,5 @@ and evidence. A satisfied obligation needs actual applicable proof; every pendin
 one must be referenced by a blocker and prevents approval. Do not silently omit
 an obligation that was present in the source review during a recheck. Recheck
 inputs include the original review, current baseline, new evidence and applicability
-claims in previous_envelope.notes_for_next_agent; independently verify them.
+claims plus the scout freshness decision in previous_envelope.notes_for_next_agent;
+use scout's freshness result while independently judging the acceptance obligations.

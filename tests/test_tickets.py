@@ -238,7 +238,7 @@ def test_decomposer_can_revise_current_files_but_protects_other_inputs(repo):
         tickets.prepare_decomposition(run, "specs/root.md")
 
 
-def test_blockers_require_host_evidence_current_definition_and_baseline(repo):
+def test_blockers_require_intact_host_evidence_and_definition_across_heads(repo):
     set_path, members = planning(repo)
     tickets.write_index(repo, set_path)
     run = run_for(repo)
@@ -265,10 +265,18 @@ def test_blockers_require_host_evidence_current_definition_and_baseline(repo):
     refs()
     item = tickets.ticket_work_item(run, set_path, members[2], evidence_path)
     assert item.ticket_id == "TICKET-M"
-    record_path.write_text(record.model_copy(update={"baseline": "0" * 40}).model_dump_json())
-    refs()
-    with pytest.raises(tickets.TicketError, match="baseline"):
+    (repo / "unrelated.py").write_text("unrelated_feature = True\n")
+    git(repo, "add", "unrelated.py")
+    git(repo, "commit", "-qm", "添加无关功能")
+    assert record.baseline != git(repo, "rev-parse", "HEAD")
+    reused = tickets.ticket_work_item(run, set_path, members[2], evidence_path)
+    assert reused == item
+    tickets.validate_work_item(run, reused)
+    original_checks = (evidence_dir / "checks.md").read_text()
+    (evidence_dir / "checks.md").write_text("tampered evidence")
+    with pytest.raises(tickets.TicketError, match="artifact changed"):
         tickets.ticket_work_item(run, set_path, members[2], evidence_path)
+    (evidence_dir / "checks.md").write_text(original_checks)
     record_path.write_text(record.model_copy(update={"definition_sha256": "0" * 64}).model_dump_json())
     refs()
     with pytest.raises(tickets.TicketError, match="stale dependency definition"):

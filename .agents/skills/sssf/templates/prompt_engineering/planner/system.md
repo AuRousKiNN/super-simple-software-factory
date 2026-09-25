@@ -54,9 +54,13 @@ criteria to judge the result, while leaving internal implementation choices open
   pass criteria for required checks. Future validation may remain pending in a
   ready plan when the obligation and its prerequisites are fully defined.
 - Keep planned checks distinct from executed or reused evidence. Reuse requires
-  a source and applicability to the current code, tests, configuration, and
-  environment; changed premises require revalidation. Test execution later must
+  an identifiable source; the delivery scout decides freshness before use.
+  Test execution later must
   establish that intended tests actually ran, beyond a zero exit code.
+- Scout owns the delivery-time freshness decision for prior evidence. Identify
+  sources to investigate; do not reissue historical acceptance during planning.
+  Different HEADs alone do not invalidate evidence. Delivery stops if scout finds
+  stale or uncertain evidence; retain the plan's required checks.
 
 ## Readiness, revisions, and boundaries
 

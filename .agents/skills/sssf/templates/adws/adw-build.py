@@ -9,7 +9,7 @@ Usage:
     uv run adws/adw-build.py --spec specs/example/spec.md
     uv run adws/adw-build.py --ticket specs/example/spec.tickets/tickets/TICKET-1.md --ticket-set specs/example/spec.tickets/ticket-set.md --dependency-evidence evidence.json
 
-Phases: code(preflight/input) -> builder -> code(checks) -> reviewer -> code(route)
+Phases: code(preflight/input) -> [scout(evidence freshness)] -> builder -> code(checks) -> reviewer -> code(route)
         -> [builder(repair) -> code(checks) -> reviewer] bounded
         -> documenter -> git(commit) -> finish -> ticket acceptance when applicable
 """

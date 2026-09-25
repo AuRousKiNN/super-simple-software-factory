@@ -92,7 +92,7 @@ def test_approved_ticket_rechecks_on_new_head_without_builder(monkeypatch, repo)
     run = Flow(repo, [review()], name='revalidate')
     monkeypatch.setattr(adw_recheck.session, 'ensure', lambda *_: run)
     assert adw_recheck.main(str(request_path)) == 0
-    assert [p.owner for p, c in run.calls] == ['reviewer', 'documenter']
+    assert [p.owner for p, c in run.calls] == ['scout', 'reviewer', 'documenter']
     record = json.loads((run.session_dir / 'ticket-acceptance.json').read_text())
     assert record['baseline'] == git(repo, 'rev-parse', 'HEAD')
     assert record['baseline'] != json.loads((source.session_dir / 'ticket-acceptance.json').read_text())['baseline']
@@ -136,7 +136,7 @@ def test_commit_hook_mutation_blocks_acceptance(monkeypatch, repo):
 
 
 def test_two_prerequisites_can_revalidate_without_moving_head(monkeypatch, repo):
-    # A and B are independent prerequisites of C; both records must name one HEAD.
+    # Evidence-only rechecks may still publish multiple records without moving HEAD.
     from test_tickets import write_ticket
     set_path, first, second = ticket_plan(repo)
     write_ticket(repo / second, 'TICKET-B', [])
@@ -157,6 +157,16 @@ def test_two_prerequisites_can_revalidate_without_moving_head(monkeypatch, repo)
     monkeypatch.setattr(adw_build.session, 'ensure', lambda *_: run)
     assert adw_build.main(BuildInput(ticket=second, ticket_set=set_path)) == 0
     sources.append(run)
+    original_records = [json.loads((s.session_dir / 'ticket-acceptance.json').read_text()) for s in sources]
+    assert len({r['baseline'] for r in original_records}) == 2
+    manifest = sources[-1].session_dir / 'original-dependencies.json'
+    manifest.write_text(json.dumps([tickets.artifact(repo,
+        (s.session_dir / 'ticket-acceptance.json').relative_to(repo).as_posix(), '.json').model_dump()
+        for s in sources]))
+    downstream = Flow(repo, name='bind-original-c')
+    item = tickets.ticket_work_item(downstream, set_path, third, manifest.relative_to(repo).as_posix())
+    tickets.validate_work_item(downstream, item)
+    assert item.ticket_id == 'TICKET-C'
     head = git(repo, 'rev-parse', 'HEAD')
     refs = []
     for index, source in enumerate(sources):

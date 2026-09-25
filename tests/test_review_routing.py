@@ -20,7 +20,7 @@ adw_simple_sdlc = __import__("adw-simple-sdlc")
 from adw_modules import agents, gates, permissions, quality, review_routing as routing, tickets
 from adw_modules.codex_schema import strict_output_schema
 from adw_modules.data_types import (
-    AgentCall, BuildOutput, DocumentOutput, Phase, PhaseParams, PlanOutput,
+    AgentCall, BuildOutput, DocumentOutput, EvidenceAssessment, EvidenceScoutOutput, Phase, PhaseParams, PlanOutput,
     QualityCheckSpec, RecheckEvidence, RecheckRequest, ReviewBlocker,
     ReviewFinding, ReviewObligation, ReviewOutput,
 )
@@ -154,6 +154,7 @@ class Flow:
         self.calls = []
         self.logs = []
         self.reviews = iter(reviews)
+        self.freshness_verdict = "applicable"
         self.tracer = SimpleNamespace(event=lambda event: None)
         self.console = SimpleNamespace(note=lambda text: None)
         self.closed = False
@@ -175,6 +176,11 @@ class Flow:
             (self.context_handoff_dir / "plan.md").write_text((self.repo_root / path).read_text())
             result = PlanOutput(status="success", spec_path=path, commit_message="添加需求定义")
             spec_artifacts.publish_plan(self, result)
+        elif params.owner == "scout":
+            refs = json.loads(call.prompt.split("Evidence to inspect:\n", 1)[1])
+            result = EvidenceScoutOutput(status="success", summary="Brief evidence investigation",
+                assessments=[EvidenceAssessment(**ref, verdict=self.freshness_verdict,
+                    reason="Relevant inputs inspected; fixture freshness conclusion") for ref in refs])
         elif params.owner == "builder":
             count = sum(p.owner == "builder" for p, c in self.calls)
             (self.repo_root / "code.py").write_text(f"value = {count}\n")
@@ -300,15 +306,15 @@ def test_recheck_evidence_only_starts_with_checks_or_review_never_builder(monkey
     request_path = repo / "recheck.json"
     request_path.write_text(request.model_dump_json())
     assert adw_recheck.main(str(request_path)) == 0
-    assert [p.owner for p, c in run.calls] == ["reviewer", "documenter"]
+    assert [p.owner for p, c in run.calls] == ["scout", "reviewer", "documenter"]
     assert run.logs[0]["changed"] is False
-    assert request.original_review.path in run.calls[0][1].previous.notes_for_next_agent
+    assert request.original_review.path in run.calls[1][1].previous.notes_for_next_agent
     assert run.calls[0][1].work_item == tickets.spec_work_item(repo, "specs/collection/spec.md")
 
 
 @pytest.mark.parametrize("mutation,error", [
     ("definition", "artifact changed"), ("evidence", "artifact changed"),
-    ("baseline", "current full Git HEAD"), ("code", "affected configured checks"),
+    ("baseline", "current full Git HEAD"),
     ("missing_check", "capability missing"), ("blocker", "name original blockers"),
 ])
 def test_recheck_rejects_invalid_or_inapplicable_inputs(monkeypatch, repo, mutation, error):
@@ -320,8 +326,6 @@ def test_recheck_rejects_invalid_or_inapplicable_inputs(monkeypatch, repo, mutat
         (repo / "evidence.md").write_text("changed proof")
     elif mutation == "baseline":
         request.baseline = "0" * 40
-    elif mutation == "code":
-        (repo / "code.py").write_text("changed implementation")
     elif mutation == "missing_check":
         request.checks = ["unconfigured"]
     else:
@@ -440,3 +444,39 @@ def test_quality_timeout_preserves_byte_output(monkeypatch, repo):
         result = quality.run_selected(run, ["test"])
     assert not result.passed and result.checks[0].returncode == 124
     assert "partial stdout" in Path(result.artifacts[0]).read_text()
+
+
+@pytest.mark.parametrize("commit_kind", ["empty", "documentation"])
+def test_recheck_reuses_prior_review_after_head_only_change(monkeypatch, repo, commit_kind):
+    monkeypatch.chdir(repo)
+    source, request = source_receipt(repo)
+    if commit_kind == "documentation":
+        spec_artifacts.initialize(source, tickets.artifact(repo, "specs/collection/spec.md"))
+        overview = repo / "specs/collection/README.md"
+        overview.write_text(overview.read_text() + "\nUnrelated execution notes\n")
+        git(repo, "add", "specs/collection/README.md")
+    git(repo, "commit", "--allow-empty", "-qm", "记录无关元数据")
+    request.baseline = routing.baseline(source)
+    run = Flow(repo, name="recheck")
+    with run.phase(PhaseParams(name="input", kind="code", owner="review_routing",
+                              description="Check prior review applicability across commits")):
+        prepared = routing.prepare_recheck(run, request, set())
+    assert prepared.source.baseline != request.baseline
+    assert not prepared.changed
+    assert prepared.checks == []
+    assert prepared.source.review.required_verification
+
+
+def test_successful_checks_remain_applicable_when_only_head_changes(monkeypatch, repo):
+    monkeypatch.chdir(repo)
+    run = Flow(repo)
+    spec = QualityCheckSpec(name="test", area="backend", operation="build",
+                            argv=[sys.executable, "-c", "print('passed')"])
+    monkeypatch.setattr(quality, "check_specs", lambda: {"test": spec})
+    with run.phase(PhaseParams(name="checks", kind="code", owner="quality",
+                              description="Verify actual check results survive commit metadata changes")):
+        output = quality.run_selected(run, ["test"])
+    git(repo, "commit", "--allow-empty", "-qm", "更新提交元数据")
+    results = routing.refresh_results(run, {c.name: c for c in output.checks})
+    assert results["test"].passed and results["test"].applicable
+    assert routing.acceptance_decision(review(), routing.RoutingPolicy(), results, ["test"]).action == "approve"

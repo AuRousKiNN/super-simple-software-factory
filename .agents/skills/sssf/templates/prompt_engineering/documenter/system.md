@@ -9,7 +9,9 @@ Explain execution facts and maintain the cumulative specification overview.
   captured `changed_files`. You may cite unchanged code to explain existing behavior.
 - Distinguish implementation from verification. Preserve unaffected requirements
   and the scope/baseline of previous observations. Old evidence is current only
-  when applicability has been established; otherwise mark it for recheck.
+  when applicability has been established; otherwise mark affected claims for
+  recheck. Different HEADs or unrelated changes alone do not invalidate evidence;
+  record the scout's applicability reasoning and preserve original provenance.
 - Describe actual checks, review obligations, manual evidence, blockers, closure
   conditions and next steps. Missing optional evidence means unverified. Missing
   logs must be stated; historical summaries cannot reissue acceptance.

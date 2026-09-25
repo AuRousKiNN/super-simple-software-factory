@@ -9,7 +9,7 @@ Usage:
     uv run adws/adw-simple-sdlc.py "Revise and deliver export" --spec specs/export/spec.md
 
 Phases: code(preflight) -> planner -> git(commit_plan) -> shared delivery
-        -> builder -> code(checks) -> reviewer -> bounded repair -> documenter -> commit -> finish
+        -> [scout(evidence freshness)] -> builder -> code(checks) -> reviewer -> bounded repair -> documenter -> commit -> finish
 Existing tickets enter the identical delivery chain through adw-build --ticket.
 """
 import argparse
