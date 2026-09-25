@@ -555,6 +555,7 @@ def main(argv: list[str] | None = None) -> int:
     print("\nspec artifact upgrade: merge --spec-dir/--spec targets, DocumentDraftOutput and host publication.")
     print("  Documenter writes only invocation reports; remove standalone document workflows.")
     print("\nautomatic ticket upgrade: merge adw-build to delivery.launch; --ticket alone resolves dependencies.")
+    print("delivery recovery upgrade: merge adw-build --resume/--retry and session.new_attempt; only new checkpointed deliveries are recoverable.")
     print("  Explicitly run scripts/migrate_ticket_history.py for existing acceptance chronology.")
     print("\nticket contract upgrade: preserved roster/prompts/ADWs need an explicit merge.")
     print("  Add decomposer + recon; planner spec_path; builder/reviewer {{work_item}};")

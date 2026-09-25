@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import changes, gates, git_helper, quality, review_routing, spec_artifacts, tickets
+from . import changes, gates, git_helper, quality, recovery, review_routing, spec_artifacts, tickets
 from .data_types import (AcceptanceRecord, AgentCall, ArtifactRef, BuildInput, BuildOutput,
                          ChangeCapture, DocumentRequest, EnvelopeBase, FinishOptions,
                          PhaseParams, ReviewOutput, ReviewReceipt, ReviewDecision, SpecWorkItem, TicketWorkItem)
@@ -67,16 +67,18 @@ def resolve_input(run, target: BuildInput):
 def freeze_input(run, request):
     """Bind before scout without projecting implementation-in-progress documents."""
     item = request.work_item
+    restored = getattr(run, "delivery_recovery", None)
     tickets.validate_work_item(run, item, check_tree=False)
     if isinstance(item, TicketWorkItem):
-        tickets._assert_clean_baseline(run)
+        if not restored:
+            tickets._assert_clean_baseline(run)
         for ref in (item.spec, item.ticket_set, item.ticket, item.index):
             tracked = tickets._git(run.repo_root, "ls-files", "--", ref.path)
             if tracked != ref.path:
                 raise tickets.TicketError(f"bound planning input must be committed: {ref.path}")
     saved = run.session_dir / "delivery-input.json"
     config = run.cfg.model_dump(mode="json") if hasattr(run.cfg, "model_dump") else {}
-    snapshot = {"schema_version": 1, "baseline": tickets._git(run.repo_root, "rev-parse", "HEAD"),
+    snapshot = {"schema_version": 1, "baseline": request.build_base if restored else tickets._git(run.repo_root, "rev-parse", "HEAD"),
                 "work_item": item.model_dump(), "config_sha256": tickets._digest(config)}
     if snapshot["baseline"] != request.build_base:
         raise tickets.TicketError("delivery baseline changed before input binding")
@@ -97,6 +99,12 @@ def verify_frozen_input(run, request):
             or snapshot["config_sha256"] != tickets._digest(config)):
         raise tickets.TicketError("frozen delivery inputs changed before build")
     tickets.validate_work_item(run, request.work_item, check_tree=False)
+    restored = getattr(run, "delivery_recovery", None)
+    if restored:
+        if (restored.work_item != request.work_item or restored.build_base != request.build_base
+                or restored.workspace != recovery.workspace(run)):
+            raise tickets.TicketError("recovery input or workspace changed before build")
+        return
     if tickets._git(run.repo_root, "rev-parse", "HEAD") != request.build_base:
         raise tickets.TicketError("delivery baseline changed before build")
     if isinstance(request.work_item, TicketWorkItem):
@@ -105,6 +113,8 @@ def verify_frozen_input(run, request):
 
 def launch(run, target):
     """Expected input rejection is distinct from a business/runtime failure."""
+    if target.resume or target.retry:
+        return recover(run, target)
     rejected = None
     with run.phase(PhaseParams(name="delivery_input", kind="code", owner="delivery",
                                description="Resolve prerequisites and freeze clean delivery inputs before agents")) as ph:
@@ -131,25 +141,83 @@ def launch(run, target):
     return execute(run, request)
 
 
+def recover(run, target: BuildInput) -> int:
+    rejected = None
+    with run.phase(PhaseParams(name="recovery_input", kind="code", owner="delivery",
+                               description="Validate the stopped attempt and exact retained workspace before recovery")) as ph:
+        try:
+            state = recovery.load(run, target.resume or target.retry, "resume" if target.resume else "retry")
+            quality.required_checks()
+            ph.log(source=state.source, mode=state.mode, build_completed=state.build is not None)
+        except ValueError as error:
+            rejected = {"status": "preflight_rejected", "reason": str(error)}
+            tickets.atomic_json(run.session_dir / "preflight-result.json", rejected)
+            ph.log(**rejected)
+    if rejected:
+        run.finish(accepted=False, reason="preflight_rejected: " + rejected["reason"])
+        return 2
+    run.delivery_recovery = state
+    return execute(run, DeliveryRequest(state.prompt, state.work_item, state.build_base))
+
+
 def capture(run, base, notes):
     changeset = changes.capture(run, ChangeCapture(base=base))
     return changes.as_envelope(changeset, notes)
 
 
 def execute(run, request: DeliveryRequest) -> int:
-    required = quality.required_checks()
     freeze_input(run, request)
     spec_artifacts._layout(run, request.work_item.spec.path)
     verify_frozen_input(run, request)
-    prior = request.previous
+    state = getattr(run, "delivery_recovery", None) or recovery.start(run, request)
+    recovery.save(run, state)
+    run.active_delivery_checkpoint = state
+    try:
+        result = _execute(run, request, state)
+    except BaseException as error:
+        if not getattr(run, "delivery_stop_saved", False):
+            try:
+                recovery.stop(run, state, error)
+            except Exception as checkpoint_error:
+                run.console.note(f"恢复检查点保存失败，不能安全继续：{checkpoint_error}")
+        if hasattr(run.tracer, "session_finish"):
+            run.tracer.session_finish(run.adw_id, ok=False)
+        if hasattr(run, "close"):
+            run.close()
+        raise
+    finally:
+        run.active_delivery_checkpoint = None
+    state.status = "completed" if result == 0 else "stopped"
+    state.error = "" if result == 0 else (getattr(run, "reason", "") or "delivery was not accepted or publication failed")
+    if result and hasattr(run.tracer, "session_finish"):
+        run.tracer.session_finish(run.adw_id, ok=False)
+    recovery.save(run, state)
+    return result
+
+
+def _execute(run, request: DeliveryRequest, state: recovery.DeliveryCheckpoint) -> int:
+    required = sorted(set(quality.required_checks()) | set(state.required_checks))
     tickets.bind_work_item(run, AgentCall(output_type=BuildOutput, prompt=request.prompt,
                                          work_item=request.work_item), "builder")
-    with run.phase(PhaseParams(name="build", kind="agent", owner="builder", retries=1,
-                               description="Implement only the immutable selected target")) as ph:
-        build = ph.call(AgentCall(output_type=BuildOutput, prompt=request.prompt,
-                                 work_item=request.work_item, previous=prior))
-    repairs = verifications = round_number = 0
-    previous_review = None
+    build = state.build
+    if build is None:
+        recovery.save(run, state)
+        prompt = request.prompt
+        if state.source:
+            prompt += (f"\nRecovery from {state.source} ({state.mode}). Inspect and retain the existing partial work; "
+                       f"complete the same target. Prior failure: {state.source_error}")
+        with run.phase(PhaseParams(name="build", kind="agent", owner="builder", retries=1,
+                                   description="Implement the selected target, retaining any prior partial implementation")) as ph:
+            build = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
+                work_item=request.work_item, previous=state.previous_review or request.previous))
+        state.build = build
+        recovery.save(run, state)
+    else:
+        with run.phase(PhaseParams(name="restore_build", kind="code", owner="delivery",
+                                   description="Reuse completed implementation while requiring fresh verification and review")) as ph:
+            ph.log(source=state.source, summary=build.summary)
+    repairs, verifications, round_number = state.repairs, state.verifications, 0
+    previous_review = state.previous_review
     results = {}
     pending = required
     while True:
@@ -165,13 +233,19 @@ def execute(run, request: DeliveryRequest) -> int:
             results = review_routing.refresh_results(run, results)
             review_input = capture(run, request.build_base, review_routing.evidence_notes(results)
                                    + "\nQuality applicability: " + str(quality.not_applicable_checks()))
+            if previous_review:
+                review_input.notes_for_next_agent += "\nRetain and reassess all prior obligations:\n" + previous_review.model_dump_json()
             ph.log(diff=review_input.diff_path)
         with run.phase(PhaseParams(name=f"review_{round_number}", kind="agent", owner="reviewer", retries=1,
                                    description="Judge target requirements and manual obligations against current checks")) as ph:
             review = ph.call(AgentCall(output_type=ReviewOutput, prompt=request.prompt,
                 work_item=request.work_item, previous=review_input,
-                gates=[gates.artifacts_exist, gates.verdict_consistent, gates.obligations_retained(previous_review)]))
+                gates=[gates.artifacts_exist, gates.verdict_consistent, gates.obligations_retained(previous_review)]
+                      + ([gates.verification_artifacts] if isinstance(request.work_item, TicketWorkItem) else [])))
         previous_review = review
+        state.previous_review = review
+        state.required_checks = sorted(set(required) | set(results))
+        recovery.save(run, state)
         with run.phase(PhaseParams(name=f"route_{round_number}", kind="code", owner="review_routing",
                                    description="Persist review ownership and enforce required checks and bounded repair")) as ph:
             results = review_routing.refresh_results(run, results)
@@ -187,14 +261,24 @@ def execute(run, request: DeliveryRequest) -> int:
                 build.commit_message or "实现需求并记录验证结果"))
         if decision.action == "repair":
             repairs += 1
+            state.repairs = repairs
+            # A partial repair invalidates the previous successful builder output.
+            state.build = None
+            state.required_checks = sorted(set(state.required_checks) | set(decision.checks))
+            recovery.save(run, state)
             with run.phase(PhaseParams(name=f"revise_{repairs}", kind="agent", owner="builder", retries=1,
                                        description="Repair owned implementation defects while retaining the same target")) as ph:
                 build = ph.call(AgentCall(output_type=BuildOutput, prompt=request.prompt,
                                          work_item=request.work_item, previous=review))
+            state.build = build
+            recovery.save(run, state)
             pending = sorted(set(required) | set(results) | set(decision.checks))
             results = {}
         else:
             verifications += 1
+            state.verifications = verifications
+            state.required_checks = sorted(set(state.required_checks) | set(decision.checks))
+            recovery.save(run, state)
             pending = decision.checks
 
 
@@ -226,7 +310,7 @@ def complete(run, evidence: DeliveryEvidence) -> int:
         for obligation in evidence.review.required_verification:
             if not obligation.satisfied or not obligation.evidence:
                 raise ValueError(f"required validation has no evidence: {obligation.id}")
-            manual.extend(tickets.artifact(run.repo_root, _relative(run, value), Path(value).suffix) for value in obligation.evidence)
+            manual.extend(tickets.verification_artifact(run.repo_root, value) for value in obligation.evidence)
         manual.extend(evidence.extra_evidence)
     document = spec_artifacts.document(run, DocumentRequest(work_item=item,
         purpose="记录实施、质量检查、独立审查及未关闭义务。" + evidence.decision.reason,
@@ -275,6 +359,7 @@ def complete(run, evidence: DeliveryEvidence) -> int:
                 definition_sha256=item.definition_sha256, baseline=git_helper.rev("HEAD"), **publication)
             tickets.record_acceptance(run, record)
     except Exception as error:
+        run.reason = f"delivery acceptance publication failed: {error}"
         run.console.note(f"交付验收签发失败，需使用 adw-recheck 重新验证：{error}")
         return 1
     return 0

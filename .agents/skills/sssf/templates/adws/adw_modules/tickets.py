@@ -50,6 +50,22 @@ def artifact(root: Path, value: str, suffix: str = ".md") -> ArtifactRef:
     return ArtifactRef(path=value, sha256=hashlib.sha256(data).hexdigest())
 
 
+def verification_artifact(root: Path, value: str) -> ArtifactRef:
+    """Retained reviewer proof; never resolve an alias into an acceptable path."""
+    path = Path(value)
+    if path.is_absolute():
+        try:
+            value = path.relative_to(root.absolute()).as_posix()
+        except ValueError as error:
+            raise TicketError(f"evidence must be inside the repository: {value}") from error
+    path = repo_path(root, value)
+    if "node_modules" in path.relative_to(root).parts:
+        raise TicketError(f"dependency reference is not retained verification evidence: {value}")
+    if not path.is_file():
+        raise TicketError(f"verification evidence must be an existing regular file: {value}")
+    return artifact(root, value, path.suffix)
+
+
 def verify_ref(root: Path, ref: ArtifactRef) -> None:
     actual = artifact(root, ref.path, Path(ref.path).suffix)
     if actual != ref:

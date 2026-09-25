@@ -14,6 +14,7 @@ Low-level behavior belongs in `adws/adw_modules/`. Keep ADW entry points thin.
 | `evidence_freshness.py` | explicit recheck prior-evidence investigation |
 | `permissions.py` | content snapshots, write contracts, safe restoration |
 | `runner.py` | phase lifecycle, atomic thread mapping, totals, finish verdict |
+| `recovery.py` | host-owned delivery checkpoints, exact workspace validation, explicit new attempts |
 | `session.py` | session creation, recovery, signals, runtime shutdown |
 | `tracer.py` | schema-v2 SQLite persistence |
 | `review_routing.py` | structured ownership, bounded route decisions, immutable handoffs and recheck validation |

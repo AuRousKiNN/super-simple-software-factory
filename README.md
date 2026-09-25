@@ -250,6 +250,20 @@ descriptions with task-specific intent before relying on the trace.
 修复后重跑必跑及已执行检查；文档和提交不得改变已验证的实现快照。
 规格与票据是目标模式，不存在单独的 ticket 工作流。
 
+交付失败或正常中断后，可以显式继续或重试，无需先提交残留的半成品：
+
+```bash
+uv run adws/adw-build.py --resume <原运行ID>
+uv run adws/adw-build.py --retry <原运行ID>
+```
+
+`--resume` 保留成功完成的 builder 工作；未完成的 builder 或修复会重跑。
+`--retry` 基于已有改动重新执行 builder，并重置修复预算。两者均创建新运行，
+保留旧记录，重新执行质量检查、审查和验收。恢复前核对目标、配置与停止时的
+工作区快照；不会覆盖后来加入的改动。此入口也支持 SDLC 进入共享交付链后的恢复。
+旧运行没有检查点、规划阶段失败或强杀后没有终态检查点时，不会推测性续跑。
+安装升级需要合并保留的构建入口，详见 [恢复说明](.agents/skills/sssf/references/delivery-recovery.md)。
+
 ## Observability
 
 The tracer writes SQLite directly in WAL mode; readers poll by rowid. There is

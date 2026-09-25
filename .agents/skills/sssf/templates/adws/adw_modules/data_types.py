@@ -731,11 +731,13 @@ class BuildInput(BaseModel):
     ticket: str | None = None
     ticket_set: str | None = None
     dependency_evidence: str | None = None
+    resume: str | None = None
+    retry: str | None = None
 
     @model_validator(mode="after")
     def exclusive_mode(self):
-        if sum(bool(v) for v in (self.prompt, self.spec, self.ticket)) != 1:
-            raise ValueError("provide exactly one of prompt, --spec or --ticket")
+        if sum(bool(v) for v in (self.prompt, self.spec, self.ticket, self.resume, self.retry)) != 1:
+            raise ValueError("provide exactly one of prompt, --spec, --ticket, --resume or --retry")
         if self.ticket_set and not self.ticket:
             raise ValueError("--ticket-set requires --ticket")
         if self.dependency_evidence and not self.ticket:

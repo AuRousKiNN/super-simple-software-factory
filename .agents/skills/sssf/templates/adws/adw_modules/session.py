@@ -10,6 +10,7 @@ from __future__ import annotations
 import atexit
 import os
 import signal
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -55,3 +56,18 @@ def ensure(cfg: SSSFConfig, adw_id: str | None = None) -> Run:
     _finalize_when_killed(run)
     run.console.session_started(adw_id, run.engineer)
     return run
+
+
+def new_attempt(cfg: SSSFConfig, adw_id: str | None = None) -> Run:
+    """Reject a reused recovery destination before session_start can rewrite it."""
+    if adw_id:
+        if Path(adw_id).name != adw_id or adw_id in {".", ".."}:
+            raise ValueError("recovery destination must be an adw_id, not a path")
+        if (Path(cfg.defaults.data_dir) / "sessions" / adw_id).exists():
+            raise ValueError("recovery requires a fresh destination adw_id")
+        database = Path(cfg.observability.db)
+        if database.exists():
+            with sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True) as connection:
+                if connection.execute("SELECT 1 FROM sessions WHERE adw_id=?", (adw_id,)).fetchone():
+                    raise ValueError("recovery destination already exists in trace history")
+    return ensure(cfg, adw_id)

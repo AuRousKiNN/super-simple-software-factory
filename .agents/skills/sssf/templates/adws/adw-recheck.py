@@ -72,7 +72,8 @@ def main(request_path: str, config: str = "adws/adw_sssf_config/sssf.config.yaml
             review = ph.call(AgentCall(output_type=ReviewOutput, prompt=prepared.source.prompt,
                                        work_item=prepared.source.work_item, previous=previous,
                                        gates=[gates.artifacts_exist, gates.verdict_consistent,
-                                              gates.obligations_retained(previous_review)]))
+                                              gates.obligations_retained(previous_review)]
+                                       + ([gates.verification_artifacts] if isinstance(prepared.source.work_item, TicketWorkItem) else [])))
         previous_review = review
         with run.phase(PhaseParams(name=f"route_{round_number}", kind="code", owner="review_routing",
                                    description="Save the new verdict and stop unless bounded verification can close it")) as ph:

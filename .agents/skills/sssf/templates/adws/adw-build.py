@@ -8,6 +8,8 @@ Usage:
     uv run adws/adw-build.py "Implement the requested change"
     uv run adws/adw-build.py --spec specs/example/spec.md
     uv run adws/adw-build.py --ticket specs/example/spec.tickets/tickets/TICKET-1.md
+    uv run adws/adw-build.py --resume <failed-or-interrupted-adw-id>
+    uv run adws/adw-build.py --retry <failed-or-interrupted-adw-id>
 
 Phases: code(preflight/input) -> builder -> code(checks) -> reviewer -> code(route)
         -> [builder(repair) -> code(checks) -> reviewer] bounded
@@ -26,7 +28,7 @@ def main(prompt: str | BuildInput, config: str = "adws/adw_sssf_config/sssf.conf
     target = BuildInput(prompt=prompt) if isinstance(prompt, str) else prompt
     cfg = agents.load_config(config)
     agents.validate(cfg, REQUIRED_AGENTS)
-    run = session.ensure(cfg, adw_id)
+    run = session.new_attempt(cfg, adw_id) if target.resume or target.retry else session.ensure(cfg, adw_id)
     with run.phase(PhaseParams(name="request", kind="engineer", owner=run.engineer,
                                description="Record the selected delivery target and request")) as ph:
         ph.log(input=target.model_dump())
@@ -40,12 +42,15 @@ if __name__ == "__main__":
     parser.add_argument("--ticket")
     parser.add_argument("--ticket-set")
     parser.add_argument("--dependency-evidence")
+    parser.add_argument("--resume", help="continue a stopped delivery in a new session; retain completed implementation")
+    parser.add_argument("--retry", help="retry builder on retained changes in a new session; reset repair budgets")
     parser.add_argument("--config", default="adws/adw_sssf_config/sssf.config.yaml")
     parser.add_argument("--adw-id")
     args = parser.parse_args()
     try:
         target = BuildInput(prompt=utils.resolve_prompt(args.prompt) if args.prompt else "", spec=args.spec,
-                            ticket=args.ticket, ticket_set=args.ticket_set, dependency_evidence=args.dependency_evidence)
+                            ticket=args.ticket, ticket_set=args.ticket_set, dependency_evidence=args.dependency_evidence,
+                            resume=args.resume, retry=args.retry)
     except ValueError as error:
         parser.error(str(error))
     sys.exit(main(target, args.config, args.adw_id))

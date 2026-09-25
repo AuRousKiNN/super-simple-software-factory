@@ -155,6 +155,17 @@ the project's real command registry: quality.py is preserved on upgrade. Update
 reviewer prompts so ticket required-verification evidence names actual files.
 No generic distribution can infer the target repository's correct test command.
 
+## Upgrading delivery recovery
+
+Install the managed runtime update, including `recovery.py`. Merge `--resume`
+and `--retry` into the preserved `adw-build.py` CLI and its `BuildInput`, and use
+`session.new_attempt` for recovery destinations. Compare with the current
+template and verify `--help`; the installer does not overwrite customized ADWs.
+The shared delivery module automatically checkpoints newly started build and
+SDLC implementation chains. Existing failed sessions do not gain synthetic
+checkpoints. No database migration or acceptance-history rewrite is needed.
+See [recovery semantics and limits](../references/delivery-recovery.md).
+
 ## Upgrading automatic ticket delivery
 
 Merge the preserved `adw-build.py` entry to call `delivery.launch(run, target)`.
@@ -176,3 +187,16 @@ records and referenced proof before writing, and never changes original receipt
 bytes. Missing successful trace timestamps fail explicitly; do not use mtimes or
 invent acceptance times. Old records can still be explicitly supplied with
 `--dependency-evidence`, subject to normal validation and scout applicability.
+
+
+## Upgrading retained verification evidence
+
+Update managed `gates.py`, `tickets.py` and `delivery.py`. Merge the reviewer
+system prompt's retained-file rules into preserved prompts, and add
+`gates.verification_artifacts` to ticket reviewer calls in the preserved
+`adw-recheck.py` (see its template). Normal build/resume uses shared delivery.
+Invalid proof paths now enter the reviewer's bounded same-thread gate repair
+before routing or publication. Dependency documentation remains reading reference;
+retain the inspection and its applicability in the current review report instead
+of issuing acceptance against a symlink or `node_modules` file. Historical session
+artifacts stay immutable; any explicitly requested recovery starts a new session.

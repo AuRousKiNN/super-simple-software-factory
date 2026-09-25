@@ -63,6 +63,7 @@ def _glob(pattern: str) -> re.Pattern:
 
 INDEX_PATH = "@git-index"
 HOST_SESSION_FILES = (
+    "delivery-checkpoint.json",
     "spec-binding.json", "spec-artifacts/*.json", "spec-finish.json", "spec-acceptance/*.json", "ticket-facts.json",
     "documentation/**", "delivery-evidence.json", "delivery-input.json", "preflight-result.json", "ticket-acceptance-order.json", "work_item.json", "decomposition.json", "decomposition-published.json", "ticket-acceptance.json", "review-routing/*.json",
 )
@@ -285,9 +286,19 @@ def _host_patterns(run) -> list[str]:
     return [f"{prefix}/*/{name}" for name in HOST_SESSION_FILES]
 
 
+def _recovery_patterns(run) -> list[str]:
+    state = getattr(run, "delivery_recovery", None)
+    if state is None:
+        return []
+    root = Path(run.repo_root).resolve()
+    paths = [run.session_dir.parent / source for source in state.history]
+    return [path.resolve().relative_to(root).as_posix() + "/**"
+            for path in paths if path.resolve().is_relative_to(root)]
+
+
 def _extra_patterns(run) -> list[str]:
     from .spec_artifacts import HOST_PATHS
-    patterns = _host_patterns(run) + HOST_PATHS
+    patterns = _host_patterns(run) + HOST_PATHS + [p + "/*" for p in _recovery_patterns(run)]
     scope = getattr(run, "active_write_scope", None)
     if scope:
         patterns.append(scope + "**/*" if scope.endswith("/") else scope)
@@ -315,7 +326,7 @@ def permitted(path: str, agent: AgentConfig, cfg: SSSFConfig, run=None) -> bool:
     if any(_matches(normalized, pattern) for pattern in HOST_PATHS):
         return False
     if run is not None and (normalized in getattr(run, "active_readonly_paths", [])
-                            or any(_matches(normalized, p) for p in _host_patterns(run))):
+                            or any(_matches(normalized, p) for p in _host_patterns(run) + _recovery_patterns(run))):
         return False
     if run is not None and any(_matches(normalized, item) for item in always_writable(run)):
         return True

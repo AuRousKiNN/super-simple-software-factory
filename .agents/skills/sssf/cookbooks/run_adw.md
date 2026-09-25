@@ -45,7 +45,10 @@ HEAD fixed and store their execution documents in the session directory.
 
 An inline prompt and a prompt-file path are equivalent. `--adw-id` joins a
 schema-v2 session when its role mapping remains compatible; it does not perform
-an implicit last-session lookup. A changed model, role instructions, runtime,
+an implicit last-session lookup or restore workflow progress. Use the explicit
+[delivery recovery entry](../references/delivery-recovery.md) for a stopped build:
+`uv run adws/adw-build.py --resume <id>` or `--retry <id>`, in a new session.
+A changed model, role instructions, runtime,
 repository root, or permission policy makes resume fail explicitly.
 
 If the engineer names a roster or model tier, resolve it to a config file and
@@ -109,6 +112,11 @@ collect only the evidence needed for the failure report, then report to the user
 and wait for their next instruction. If no phase or `adw_id` was created, report
 the launch error and exit code instead. If acceptance cannot be verified, report
 that uncertainty rather than claiming success or launching another run.
+
+When the user explicitly asks to continue/retry, this is authorization to use
+the recovery entry above. Check the installed `adw-build.py --help`; preserve
+the source ID, config and workspace. Recovery preflight rejects ineligible runs
+before business agents. Do not mistake a repeated `--adw-id` launch for recovery.
 
 The ADW's existing bounded gate/JSON retries and fix loops remain internal to
 that run. An intermediate failed check inside such a loop is not itself a

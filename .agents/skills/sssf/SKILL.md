@@ -35,6 +35,10 @@ role's work itself.
   updates or repeatedly inspect its trace. See [run_adw.md](cookbooks/run_adw.md).
 - If an ADW fails, stop orchestration and report the failure to the user. Do not
   automatically repair, retry, resume, or launch a follow-up ADW.
+- An explicit user request to resume/retry authorizes the delivery recovery entry:
+  `adw-build --resume <id>` or `--retry <id>`, always in a new session. Follow
+  [delivery recovery](references/delivery-recovery.md); `--adw-id` alone does not
+  restore workflow progress.
 - In the final report, state phase name, owner, status, and error plainly.
 - Do not claim a workflow passed until `run.finish()` records acceptance.
 - Execution records belong to business ADWs. Do not launch a standalone documenter.

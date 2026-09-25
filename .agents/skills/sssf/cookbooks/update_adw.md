@@ -70,6 +70,12 @@ an evidence scout or freeze referenced implementation files. Retained session re
 and receipts stay immutable. Explicit recheck still uses `evidence_freshness.inspect`
 before checks/reviewer to assess the evidence supplied for that recheck.
 
+Shared delivery also owns [explicit recovery](../references/delivery-recovery.md).
+Retain its checkpoints when extending the chain: invalidate completed builder
+state before a repair, preserve consumed budgets and prior review obligations,
+and always reverify before acceptance. Do not add automatic retry in entrypoints
+or cache approved verdicts across attempts.
+
 Three distinctions worth keeping straight:
 
 - **Gate retries vs. JSON retries.** `retries` buys extra *gate*-correction rounds. Malformed final JSON is handled separately and always — `JSON_FIX_ATTEMPTS` in `adw_modules/agents.py` (2 by default) re-prompts the same session for a valid object even on a phase with `retries=0`. Raising the phase's `retries` does not buy more JSON attempts, and vice versa.

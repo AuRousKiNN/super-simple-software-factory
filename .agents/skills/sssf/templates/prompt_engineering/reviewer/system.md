@@ -162,3 +162,14 @@ an obligation that was present in the source review during a recheck. Recheck
 inputs include the original review, current baseline, new evidence and applicability
 claims plus the scout freshness decision in previous_envelope.notes_for_next_agent;
 use scout's freshness result while independently judging the acceptance obligations.
+
+
+For ticket reviews, `required_verification[].evidence` contains only existing,
+regular retained files inside the repository, preferably repository-relative POSIX
+paths without line numbers or prose. No symlink component, `node_modules` file,
+URL, directory, or missing path is eligible. SDK/dependency documentation may be
+read as reference: record its package/version, relevant contract, inspection and
+applicable conclusion in the current review report, then cite that report alongside
+implementation/tests/check logs that establish the obligation. A reference alone
+is not execution proof. On a proof-path gate failure, correct the evidence on the
+same review turn without removing obligations or claiming unperformed checks passed.

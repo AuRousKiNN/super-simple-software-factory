@@ -115,6 +115,30 @@ def verdict_consistent(envelope: EnvelopeBase, run) -> GateReport:
     return report
 
 
+def verification_artifacts(envelope: EnvelopeBase, run) -> GateReport:
+    """Return invalid ticket proof to the same reviewer within its repair budget."""
+    from . import tickets
+
+    report = GateReport()
+    for obligation in envelope.required_verification:
+        if not obligation.satisfied:
+            continue
+        report.check(f"proof {obligation.id}", bool(obligation.evidence),
+                     "satisfied obligations need retained file evidence")
+        for value in obligation.evidence:
+            try:
+                tickets.verification_artifact(run.repo_root, value)
+            except (ValueError, OSError, RuntimeError) as error:
+                report.check(f"proof {obligation.id}: {value}", False,
+                    f"{error}. Cite a stable repository file or the current review report. "
+                    "Keep SDK/dependency references in report prose; record the version, "
+                    "inspected contract and applicable findings there. Do not drop the obligation "
+                    "or claim missing validation passed.")
+            else:
+                report.check(f"proof {obligation.id}: {value}", True, "retained file evidence")
+    return report
+
+
 def obligations_retained(previous):
     """Keep the same review target and mandatory obligations across repair/recheck."""
     def gate(envelope, run):

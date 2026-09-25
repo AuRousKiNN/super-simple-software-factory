@@ -155,6 +155,13 @@ class Run:
             phase.status = "fail"                      # success must be earned
             phase.error = str(error)[:1000]
             phase.ended_at = now_iso()
+            checkpoint = getattr(self, "active_delivery_checkpoint", None)
+            if checkpoint is not None:
+                from . import recovery
+                try:
+                    recovery.stop(self, checkpoint, error)
+                except Exception as checkpoint_error:
+                    self.console.note(f"恢复检查点保存失败，不能安全继续：{checkpoint_error}")
             self.tracer.event(EventRecord(adw_id=self.adw_id, phase_id=phase.phase_id,
                                           type="error", name=params.name,
                                           payload={"error": phase.error}))
@@ -198,6 +205,7 @@ class Run:
         phases_ok = bool(self.phases) and all(p.status == "success" for p in self.phases)
         ok = phases_ok and accepted
         self.accepted = ok
+        self.reason = reason
         if phases_ok and not accepted:
             note = reason or "the run's acceptance criterion was not met"
             self.tracer.event(EventRecord(
@@ -214,6 +222,7 @@ class Run:
         try:
             spec_artifacts.sync_finished(self)
         except Exception as error:
+            self.reason = f"document synchronization failed: {error}"
             self.console.note(f"运行结果已保存，但文档同步失败：{error}")
             return 1
         self.console.session_finished(ok, self.tokens, self.cost,
