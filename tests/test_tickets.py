@@ -295,19 +295,19 @@ def test_install_upgrade_preserves_customizations_and_generated_chain(tmp_path):
     invoke(SKILL / "scripts/install.py", "--root", str(target))
     cfg = agents.load_config(str(target / "adws/adw_sssf_config/sssf.config.yaml"))
     assert agents.resolve(cfg, "decomposer").subagents.enabled
-    assert (target / "adws/adw_decompose.py").is_file()
+    assert (target / "adws/adw-decompose.py").is_file()
     config = target / "adws/adw_sssf_config/sssf.config.yaml"
     config.write_text("custom config\n")
     invoke(SKILL / "scripts/install.py", "--root", str(target))
     assert config.read_text() == "custom config\n"
     invoke(SKILL / "scripts/make_adw.py", "--name", "tickets", "--agents", "planner,decomposer,builder,reviewer")
-    body = (target / "adws/adw_tickets.py").read_text()
+    body = (target / "adws/adw-tickets.py").read_text()
     compile(body, "generated", "exec")
     assert "tickets.select_ticket" in body and "selection" in body
-    assert "work_item=work_item" in body
+    assert "DeliveryRequest(prompt, work_item" in body
     assert "return run.finish(accepted=accepted" in body
-    assert 'if decision.action != "approve":' in body
-    assert "gates.verdict_consistent" in body
+    assert "delivery.execute" in body
+    assert "delivery.preflight(run)" in body
 
 
 def test_decomposition_revises_in_place_and_closes_each_published_session(repo):

@@ -98,7 +98,7 @@ def tree_files(run) -> dict[str, str]:
         elif path.is_file():
             value = str(path.stat().st_mode).encode() + b":" + hashlib.sha256(path.read_bytes()).digest()
         elif not path.exists():
-            value = b"deleted"
+            continue  # Absence is identical before and after committing a deletion.
         else:
             # Submodules need an explicit check; their directory bytes are not proof.
             value = b"directory:" + _git(run, "status", "--porcelain", "--", os.fsdecode(raw))
@@ -170,15 +170,20 @@ def prepare_recheck(run, request: RecheckRequest, available: set[str], request_p
         raise ValueError("original_review must be a different host session's review receipt")
     if not gates.verdict_consistent(source.review, run).passed:
         raise ValueError("original review is inconsistent")
-    if source.review.approved:
-        raise ValueError("recheck requires an unapproved source review")
+    if source.review.approved and not isinstance(source.work_item, TicketWorkItem):
+        raise ValueError("recheck requires an unapproved source review or a ticket for current-baseline revalidation")
     if any(b.kind in {"spec_conflict", "ticket_conflict"} for b in source.review.blocking):
         raise ValueError("planning conflicts require planning revision and a new implementation binding")
+    if request.dependency_evidence is not None:
+        if not isinstance(source.work_item, TicketWorkItem):
+            raise ValueError("dependency_evidence requires ticket mode")
+        source = source.model_copy(update={"work_item": source.work_item.model_copy(
+            update={"dependency_evidence": request.dependency_evidence})})
     if source.work_item is not None:
         tickets.validate_work_item(run, source.work_item)
     if request.baseline != baseline(run):
         raise ValueError("recheck baseline must equal current full Git HEAD")
-    blocker_ids = {b.id for b in source.review.blocking}
+    blocker_ids = {b.id for b in source.review.blocking} | {v.id for v in source.review.required_verification}
     for evidence in request.evidence:
         tickets.verify_ref(run.repo_root, evidence.artifact)
         if not set(evidence.resolves) <= blocker_ids or not evidence.applicability.strip():
@@ -194,11 +199,16 @@ def prepare_recheck(run, request: RecheckRequest, available: set[str], request_p
     changed = source.baseline != request.baseline or source.tree_files != current
     checks = sorted(set(source.mandatory_checks) | set(request.checks)
                     | {c for b in source.review.blocking for c in b.checks})
+    if isinstance(source.work_item, TicketWorkItem):
+        from . import quality
+        checks = sorted(set(checks) | set(quality.required_checks()))
+        tickets._assert_clean_baseline(run)
     if changed and not checks:
         raise ValueError("code/configuration baseline changed; specify affected configured checks for revalidation")
     missing = set(checks) - available
     if missing:
         raise ValueError(f"recheck workflow capability missing for checks {sorted(missing)}")
+    run.evidence_only = isinstance(source.work_item, TicketWorkItem)
     # Bind only after all inputs are validated. No implementation agent is invoked.
     tickets.bind_work_item(run, AgentCall(output_type=ReviewOutput, prompt=source.prompt,
                                          work_item=source.work_item), "reviewer")

@@ -70,13 +70,35 @@ A bound session may repair its own implementation without treating those edits a
 new prerequisite evidence. A fresh session must recheck them.
 
 `record_acceptance(run, record)` is a host-only API after `run.finish(accepted=True)`.
-The custom ADW must establish actual check execution, review acceptance, required
-manual validation and applicability before issuing it. Core validates identity,
+`adw-build` and ticket-mode `adw-recheck` establish actual check execution, review
+acceptance, required validation and applicability through the shared delivery module. Core validates identity,
 current baseline and referenced artifacts; it does not infer semantics from logs.
-The one-shot build and generated skeletons do not issue acceptance records.
+Generated builder chains use this same delivery module. A ticket is an input
+mode, never a separate workflow.
 Whole-spec integration remains a separate ADW acceptance obligation; ready ticket
 definitions or a successful builder call do not prove integrated completion.
 
 New entry points validate required roster and finish after the code index phase.
 No changes to runtime or SQLite schema version 2 are required; planning artifact
 schema version 1 is independent.
+
+## Current-baseline revalidation
+
+Use `adw-recheck` with an original ticket review receipt (approved or blocked),
+current `baseline`, optional new `evidence`, and optional `dependency_evidence`
+containing refreshed ArtifactRefs. Revalidate prerequisites in topological order;
+never rewrite an old acceptance baseline. Ticket rechecks always run all applicable
+required quality checks and independent review without invoking builder. Required
+verification entries must reference real repository-relative evidence files.
+Store request manifests and transient evidence under the ignored session data
+area, or commit them before revalidation; ticket publication needs a clean baseline.
+
+Delivery documents and commits before finishing. Host finish projection may commit
+only managed documentation; unchanged implementation content is checked again.
+Acceptance binds the resulting exact HEAD and immutable check/review artifacts.
+For a completed documented scope, publishing its ticket receipt does not modify
+repository files or create another commit. A failed publication exits nonzero;
+use a fresh `adw-recheck` session to establish and publish current evidence.
+
+票据重验的文档保存在会话目录中，不修改规格目录或创建提交。这样多个前置票据可以在
+同一个 HEAD 上重新验收，并共同作为下游依赖证据。正常 build 仍发布并提交规格执行文档。

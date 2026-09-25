@@ -1,3 +1,5 @@
+> 当前实现已合并到 adw-build / delivery.py；本文保留最初的分流设计背景。
+
 # SSSF Reviewer 问题归属与工作流分流设计
 
 状态：第一版已实现。结构化合同与门禁、共享分流、两个 review 工作流、生成器和显式补证复核入口均已接入；确定性测试 112 项通过。
@@ -29,8 +31,8 @@ Reviewer 根据审查证据区分实现缺陷、验证缺口、规划冲突和�
 | `templates/adws/adw_modules/data_types.py` | `ReviewOutput` 包含 `approved`、逐项需求判断 `findings`、字符串列表 `blocking` | 为阻塞项增加可供代码消费的类型和解除条件 |
 | `templates/adws/adw_modules/agents.py` | 收到 `status="fail"` 后保存信封并抛异常，阶段终止 | 正常完成的问题分类必须通过业务结果交给 ADW |
 | `templates/adws/adw_modules/gates.py` | `verdict_consistent` 检查批准、未满足需求和阻塞列表的自洽性 | 同步检查结构化阻塞项及结论一致性 |
-| `templates/adws/adw_build_review.py` | 拒绝后在次数上限内调用 builder | 先判断问题归属，再决定是否修复 |
-| `templates/adws/adw_simple_sdlc.py` | 拒绝后调用 builder，修复后补跑测试；通过才提交 | 接入分流并保留检查与提交约束 |
+| `templates/adws/adw-build.py` | 拒绝后在次数上限内调用 builder | 先判断问题归属，再决定是否修复 |
+| `templates/adws/adw-simple-sdlc.py` | 拒绝后调用 builder，修复后补跑测试；通过才提交 | 接入分流并保留检查与提交约束 |
 | `scripts/make_adw.py` | 累计 `previous.approved` 并顺序执行后续阶段 | 通过时继续交付，拒绝或阻塞时保存原因并结束 |
 | `templates/adws/adw_modules/runner.py` | `run.finish()` 以成功/失败结束运行 | 第一版以未验收结束表达业务阻塞，记录具体原因 |
 | `templates/adws/adw_modules/tickets.py` | 使用固定 `.tickets/` 目录，按内容哈希绑定输入；发布时刷新索引并保存 session 发布记录 | 分流后的规划修订使用新 session，重新绑定修改后的定义 |
@@ -121,7 +123,7 @@ flowchart TD
 - 所有分支沿用同一个有效审查目标；范围调整通过规划修订和新绑定明确生效。
 - 提交、交付文档和验收记录签发以审查通过及强制义务全部满足为准入条件。
 
-共享分流规则放入 `adw_modules/`，ADW 脚本保留阶段顺序、分支和验收决策。同步适配 `adw_build_review.py`、`adw_simple_sdlc.py` 与 `make_adw.py`。生成器产出的一次性骨架在通过时继续交付，在拒绝或阻塞时保存原因并结束；完整修复循环由配置该能力的 ADW 提供。
+共享分流规则放入 `adw_modules/`，ADW 脚本保留阶段顺序、分支和验收决策。同步适配 `adw-build.py`、`adw-simple-sdlc.py` 与 `make_adw.py`。生成器产出的一次性骨架在通过时继续交付，在拒绝或阻塞时保存原因并结束；完整修复循环由配置该能力的 ADW 提供。
 
 ## 6. 结束、交接与继续
 
@@ -154,7 +156,7 @@ Reviewer 规划交接按以下流程接入：
 
 定义变化会使旧内容哈希绑定失效。新 session 的输入校验确认当前目标身份、定义和基线；reviewer 在这些校验成立后判断证据是否充分。
 
-原位修订已落实到运行时、角色提示词和 Ticket 合同；Reviewer 的结构化分流与 `adw_recheck.py` 补证复核入口现已接入。
+原位修订已落实到运行时、角色提示词和 Ticket 合同；Reviewer 的结构化分流与 `adw-recheck.py` 补证复核入口现已接入。
 
 ### 6.3 只补齐环境或人工证据
 
@@ -197,7 +199,7 @@ Reviewer 规划交接按以下流程接入：
 - `adw_modules/review_routing.py` 统一归属和分流规则。两个 review 工作流分别允许最多 3 次 builder 修复、2 次补验；生成器保存拒绝原因并立即停止后续阶段。
 - `quality.check_specs()` 提供明确的检查 ID 与 argv 注册表。占位命令不算已配置能力，也不能通过验证。实际检查结果附带输入指纹；代码或配置变化后，旧结果会失去适用性。
 - 每个分流阶段保存不可变的 `review-routing/<phase-seq>.json`，包含完整问题、报告副本、目标、基线、解除条件和决策；trace 保存文件位置及结束原因。交接文件纳入宿主写保护。
-- `adw_recheck.py` 使用新 session，校验原交接引用、目标定义、当前 HEAD 和新增证据，按需执行已配置检查后调用 reviewer；不调用 builder。规划冲突或定义变化需先进入新的规划与实现绑定流程。
+- `adw-recheck.py` 使用新 session，校验原交接引用、目标定义、当前 HEAD 和新增证据，按需执行已配置检查后调用 reviewer；不调用 builder。规划冲突或定义变化需先进入新的规划与实现绑定流程。
 - 本版不提供挂起/自动唤醒/通用断点续跑，也不由 starter 工作流自动签发 ticket 验收记录；相关所有权与现有 Ticket 合同一致。
 - 验证：按仓库要求提权运行 `python -m pytest -q tests`（使用 README 所列 uv 依赖），112 项通过；`git diff --check` 通过。测试覆盖输出合同、业务拒绝与执行失败的区别、gate 纠正、全部分流归属、混合阻塞、独立预算、工作流阶段顺序、提交限制、生成链中止、复核边界、过期证据和宿主交接保护。
 

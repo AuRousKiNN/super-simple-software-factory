@@ -43,12 +43,18 @@ def main(output_dir: Path) -> int:
         _run(["git", "add", "."], workspace)
         _run(["git", "commit", "-qm", "初始化合成仓库"], workspace)
 
+        quality_path = workspace / "adws/adw_modules/quality.py"
+        check = ["python3", "-c", "from pathlib import Path; assert Path('greeting.txt').read_text() == 'hello from m3\\n'"]
+        quality_text = quality_path.read_text().replace('argv=_placeholder("test")', "argv=" + repr(check))
+        quality_text += '\ndef not_applicable_checks():\n    return {"lint": "Synthetic text-only fixture", "typecheck": "No typed code", "build": "No build artifact"}\n'
+        quality_path.write_text(quality_text)
+
         prompt = (
             "Add a root-level file named greeting.txt containing exactly `hello from m3` "
             "followed by one newline. Keep the implementation limited to that file."
         )
         completed = subprocess.run(
-            [sys.executable, "adws/adw_simple_sdlc.py", prompt, "--adw-id", "m3full"],
+            [sys.executable, "adws/adw-simple-sdlc.py", prompt, "--adw-id", "m3full", "--spec-dir", "specs/greeting"],
             cwd=workspace,
             env={**os.environ, "ENGINEER_NAME": "M3 Probe"},
             capture_output=True,
@@ -71,10 +77,10 @@ def main(output_dir: Path) -> int:
         greeting = workspace / "greeting.txt"
         if not greeting.is_file() or greeting.read_text() != "hello from m3\n":
             raise AssertionError("builder did not produce the exact synthetic greeting")
-        specs = sorted(path.relative_to(workspace).as_posix() for path in workspace.glob("specs/*.md"))
+        specs = sorted(path.relative_to(workspace).as_posix() for path in workspace.glob("specs/*/spec.md"))
         docs = sorted(
             path.relative_to(workspace).as_posix()
-            for path in workspace.glob("app_docs/*.md")
+            for path in workspace.glob("specs/*/executions/*/*.md")
         )
         if not specs or not docs:
             raise AssertionError(f"missing plan or documentation: specs={specs}, docs={docs}")

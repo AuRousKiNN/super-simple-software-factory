@@ -15,7 +15,7 @@ phases and exchange typed JSON envelopes. SQLite is the durable trace.
 When invoked without a concrete request:
 
 1. Read [cookbooks/sssf_overview.md](cookbooks/sssf_overview.md).
-2. List `adws/adw_*.py` and read only each `Phases:` docstring line.
+2. List `adws/adw-*.py` and read only each `Phases:` docstring line.
 3. Present the installed ADWs as a short table and wait.
 
 If the first message already contains a request, route it immediately. If the
@@ -42,8 +42,8 @@ role's work itself.
 ## Planning target: required before launch
 
 Every workflow containing a planner requires exactly one explicit target. This
-includes all `adw_plan*` workflows, including `adw_plan_decompose`, and
-`adw_simple_sdlc`:
+includes all `adw-plan*` workflows, including `adw-plan-decompose`, and
+`adw-simple-sdlc`:
 
 - New specification: choose an unused readable `specs/<spec_key>` and pass
   `--spec-dir specs/<spec_key>`; the planner writes `spec.md` inside it.
@@ -56,8 +56,8 @@ CLI argument. Decomposition inherits the planner's `spec_path` and writes
 `specs/<spec_key>/spec.tickets/`; it needs no separate output-directory argument.
 
 ```bash
-uv run adws/adw_plan_decompose.py "plan and split the change" --spec-dir specs/example
-uv run adws/adw_plan_decompose.py "revise the plan and tickets" --spec specs/example/spec.md
+uv run adws/adw-plan-decompose.py "plan and split the change" --spec-dir specs/example
+uv run adws/adw-plan-decompose.py "revise the plan and tickets" --spec specs/example/spec.md
 ```
 
 For an existing installation, check the selected script's `--help` before
@@ -97,7 +97,10 @@ Deep references: [configuration](references/config.md),
 5. A gate verifies a claim after work completes; it does not predict which
    paths an agent might touch.
 6. A function needing more than four parameters takes one concrete data object.
-7. ADW scripts stay thin; lifecycle and policy belong in `adw_modules/`.
+7. All workflow filenames use hyphens (`adw-build.py`). Builder chains must use
+   the shared `delivery.execute` pipeline, including checks, review and documentation.
+   Ticket is a target mode of build/recheck, not a separate workflow.
+   ADW scripts stay thin; lifecycle and policy belong in `adw_modules/`.
 8. Every phase description states what the phase does and why. A restated name
    is invalid.
 9. A known command is a `kind="code"` phase. Agents are for reading and

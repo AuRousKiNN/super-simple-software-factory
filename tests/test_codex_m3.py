@@ -8,12 +8,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from test_tickets import repo
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_ADWS = ROOT / ".agents/skills/sssf/templates/adws"
 sys.path.insert(0, str(TEMPLATE_ADWS))
 
-import adw_simple_sdlc  # noqa: E402
+adw_simple_sdlc = __import__("adw-simple-sdlc")
 from adw_modules import agents, changes  # noqa: E402
 from adw_modules.agent_codex import (  # noqa: E402
     SDK_VERSION,
@@ -456,60 +457,16 @@ class _Run:
         return 0 if accepted else 1
 
 
-def test_complete_sdlc_chain_reaches_documentation(monkeypatch, tmp_path) -> None:
-    run = _Run()
-    run.repo_root = tmp_path
-    (tmp_path / "spec.md").write_text("REQ-01: required behavior. AC-01: observable result.")
-    monkeypatch.setattr(adw_simple_sdlc.agents, "load_config", lambda _path: object())
-    monkeypatch.setattr(adw_simple_sdlc.agents, "validate", lambda *_args: None)
-    monkeypatch.setattr(adw_simple_sdlc.session, "ensure", lambda *_args: run)
-    monkeypatch.setattr(adw_simple_sdlc.git_helper, "rev", lambda _ref: "a" * 40)
-    monkeypatch.setattr(adw_simple_sdlc.git_helper, "short_sha", lambda value: value[:7])
-    monkeypatch.setattr(adw_simple_sdlc.git_helper, "commit_all", lambda _message: "b" * 40)
-    monkeypatch.setattr(
-        adw_simple_sdlc.quality,
-        "run_tests",
-        lambda _run: QualityResult(passed=True, checks=[QualityCheckResult(name="test", area="backend", operation="build", command="pytest", returncode=0, passed=True, duration_seconds=0, output_artifact="test.log")]),
-    )
-    changeset = ChangeSet(
-        base=BaseRef(ref="main", commit="a" * 40, reason="pinned"),
-        files=["src.py"], insertions=1, stat="src.py | 1 +", diff_path="diff.patch",
-    )
-    captured_bases = []
-
-    def capture(_run, params):
-        captured_bases.append(params.base)
-        return changeset
-
-    monkeypatch.setattr(adw_simple_sdlc.changes, "capture", capture)
-    monkeypatch.setattr(
-        adw_simple_sdlc.changes,
-        "as_envelope",
-        lambda *_args: ChangesOutput(status="success", changed_files=["src.py"]),
-    )
-
-    monkeypatch.setattr(adw_simple_sdlc.review_routing, "refresh_results", lambda _run, results: results)
-    monkeypatch.setattr(adw_simple_sdlc.review_routing, "save", lambda *_args: tmp_path / "receipt.json")
-    from adw_modules.data_types import AgentCall, PlanningTarget, PhaseParams
-    (tmp_path / "receipt.json").write_text("{}")
-    monkeypatch.setattr(adw_simple_sdlc.git_helper, "commit_paths", lambda *_: "b" * 40)
-    monkeypatch.setattr(adw_simple_sdlc.git_helper, "diff_files", lambda *_: ["src.py"])
-    monkeypatch.setattr(adw_simple_sdlc.git_helper, "untracked_files", lambda: [])
-    def document(_run, request):
-        with _run.phase(PhaseParams(name="document", kind="agent", owner="documenter", description="Explain captured execution evidence")) as ph:
-            return ph.call(AgentCall(output_type=DocumentOutput, prompt=request.purpose))
-    monkeypatch.setattr(adw_simple_sdlc.spec_artifacts, "document", document)
-    monkeypatch.setattr(adw_simple_sdlc.spec_artifacts, "prepare_finish", lambda *_args, **_kw: None)
+def test_complete_sdlc_chain_reaches_documentation(monkeypatch, repo) -> None:
+    from test_review_routing import setup_flow, review
+    from adw_modules.data_types import PlanningTarget
+    run = setup_flow(monkeypatch, repo, [review()], adw_simple_sdlc)
     assert adw_simple_sdlc.main("build it", target=PlanningTarget(spec_dir="specs/example")) == 0
-    assert [phase.name for phase in run.phases] == [
-        "request", "plan", "commit_plan", "spec_input", "build", "test_1",
-        "changes_review_1", "review_1", "route_1", "commit_build", "changes", "document",
-        "commit_docs",
-    ]
-    review_call = next(call for name, call in run.calls if name == "review_1")
+    assert [p.owner for p, c in run.calls] == ["planner", "builder", "reviewer", "documenter"]
+    review_call = next(c for p, c in run.calls if p.owner == "reviewer")
     assert isinstance(review_call.previous, ChangesOutput)
-    assert captured_bases == ["b" * 40, "a" * 40]
-    assert run.accepted[0] is True
+    assert review_call.work_item.spec.path == "specs/example/spec.md"
+    assert run.accepted is True
 
 
 def test_change_capture_includes_untracked_new_files(tmp_path: Path, monkeypatch) -> None:

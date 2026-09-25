@@ -17,7 +17,7 @@ deciding.
 ║      argv=["bun", "test", "apps/web/server.test.ts"]                         ║
 ║      argv=["uv", "run", "pytest", "-q"]                                      ║
 ║      argv=["npm", "run", "lint"]                                             ║
-║  Delete the blocks you don't need, and drop them from run_quality()'s list.   ║
+║  Declare inapplicable checks with reasons in not_applicable_checks().        ║
 ║                                                                              ║
 ║  Two rules when you write the real command:                                  ║
 ║    1. argv LIST, never a shell string — no quoting bugs, no shell injection.  ║
@@ -34,7 +34,6 @@ import shlex
 import subprocess
 import time
 from pathlib import Path
-from typing import Callable
 
 from . import review_routing
 from .data_types import (EventRecord, QualityCheckResult, QualityCheckSpec, QualityResult,
@@ -152,6 +151,28 @@ def check_specs() -> dict[str, QualityCheckSpec]:
     }
 
 
+def not_applicable_checks() -> dict[str, str]:
+    """Explicit project-specific exclusions, each with a reviewable reason.
+
+    Example: {"build": "This repository publishes no compiled artifact."}
+    Testing cannot be excluded from a delivery workflow.
+    """
+    return {}
+
+
+def required_checks() -> list[str]:
+    """Fail before business turns when an applicable quality block is unconfigured."""
+    specs = check_specs()
+    excluded = not_applicable_checks()
+    if "test" in excluded or set(excluded) - set(specs) or any(not r.strip() for r in excluded.values()):
+        raise ValueError("invalid quality applicability: test is required and exclusions need configured names and reasons")
+    names = [name for name in specs if name not in excluded]
+    missing = (set(names) | {"test"}) - configured_checks()
+    if missing:
+        raise ValueError(f"required checks are not configured: {sorted(missing)}; configure quality.py before delivery")
+    return names
+
+
 def configured_checks() -> set[str]:
     return {name for name, spec in check_specs().items() if spec.argv != _placeholder(spec.name)}
 
@@ -228,23 +249,4 @@ def run_quality(run) -> QualityResult:
     The runner did its job; the CODE is what failed. Hand this result to the
     builder and let the bounded repair loop decide the run's fate.
     """
-    blocks: list[Callable] = [
-        test,
-        lint,
-        typecheck,
-        build,
-    ]
-    checks = [block(run) for block in blocks]
-    # A failure is the command, its exit code, and what it actually printed —
-    # everything a builder needs to repair without opening a log or being told
-    # what the error "means" by a parser that guessed.
-    failures = [
-        f"{check.name}: `{check.command}` exited {check.returncode}\n{check.output_tail}".rstrip()
-        for check in checks if not check.passed
-    ]
-    return QualityResult(
-        passed=not failures,
-        checks=checks,
-        failures=failures,
-        artifacts=[check.output_artifact for check in checks],
-    )
+    return run_selected(run, required_checks())

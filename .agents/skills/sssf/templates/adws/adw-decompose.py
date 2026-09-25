@@ -4,7 +4,7 @@
 # ///
 """ADW Decompose — validate and decompose one explicit current spec.
 
-Usage: uv run adws/adw_decompose.py --spec specs/request/spec.md
+Usage: uv run adws/adw-decompose.py --spec specs/request/spec.md
 Phases: code(input) -> decomposer -> code(index)
 """
 import argparse

@@ -4,7 +4,7 @@ Modify an existing ADW chain — add phases, add gates, add a bounded fix loop.
 
 ## Preserve the planning target
 
-For every chain containing a planner, including all `adw_plan*` scripts, keep
+For every chain containing a planner, including all `adw-plan*` scripts, keep
 `--spec-dir` and `--spec` in a required mutually exclusive CLI group. Construct
 `PlanningTarget` and pass it as `AgentCall.planning_target` to the planner.
 Keep both new-spec and revision examples in the script docstring up to date.
@@ -26,16 +26,11 @@ Phase `name` must be unique within the run — that is what the UI keys blocks o
 
 `description` is **required**, and `PhaseParams` rejects both a blank one and one that merely restates the name. It is the single line of intent the trace, the console, and the UI phase block show, so write what the phase does and why — `"Land the code only now: green suite, approved review"`, not `"Commit build"`.
 
-A code phase does its work in the block body and logs what it did. The commit phase that closes `adw_plan_build.py` and `adw_plan_build_test.py` is the pattern:
-
-```python
-    with run.phase(PhaseParams(name="commit", kind="code", owner="git",
-                               description="Land the builder's changes, using the message it wrote")) as ph:
-        message = build.commit_message or f"sssf({run.adw_id}): {build.summary}"
-        ph.log(sha=git_helper.commit_all(message), message=message)
-```
-
-`commit_message` is a field on `PlanOutput`, `BuildOutput`, and `DocumentOutput` that the agent fills in **for its own work product**, so always pair it with a fallback — it defaults to empty. `commit_all` raises if the cwd is not a git repo or nothing changed, which fails the phase rather than committing nothing. A chain that commits more than once (`adw_simple_sdlc.py`) commits each product with its own author's message.
+A code phase executes known operations and logs evidence. For delivery, use
+`adw_modules/delivery.py`: document the verified result before committing it, then
+confirm that commit hooks and finish projection did not change implementation
+content. Use `git_helper.commit_paths` with explicit paths; never introduce an
+unchecked `commit_all` shortcut after builder.
 
 ## Remove a phase
 
@@ -58,37 +53,18 @@ Gate claims, not guesses: declared artifacts exist and are non-empty, declared J
 
 ## Add a bounded fix loop
 
-The pattern from `adw_build_test.py` — always bounded by a module-level constant. The runner is a **code** phase, because the command is known; only repairing it needs an agent:
+The shared `delivery.execute` loop allows three builder repairs and two supplemental
+verification rounds. Initial checks and rechecks after a repair run every required
+and previously executed check. A reviewer classifies failures and Python chooses
+repair, verify, handoff or approval. A repair always invalidates prior evidence.
 
-```python
-MAX_FIX_LOOPS = 3
+Configure `quality.check_specs()` and explicit `not_applicable_checks()` reasons
+first. `quality.required_checks()` rejects placeholders before any business turn;
+test cannot be excluded. A code phase running a red suite has executed correctly,
+but the shared acceptance decision cannot approve failed, missing or stale checks.
 
-    test = None
-    for i in range(1, MAX_FIX_LOOPS + 1):
-        with run.phase(PhaseParams(name=f"test_{i}", kind="code", owner="quality",
-                                   description="Run the suite — a known command, so code runs it")) as ph:
-            test = quality.run_tests(run)          # QualityResult, not an envelope
-            ph.log(passed=test.passed, artifacts=", ".join(test.artifacts))
-
-        if test.passed:
-            break
-
-        with run.phase(PhaseParams(name=f"fix_{i}", kind="agent", owner="builder", retries=1,
-                                   description="Repair what the suite reported, from its verbatim output")) as ph:
-            previous = ph.call(AgentCall(output_type=BuildOutput, prompt=prompt,
-                                         previous=quality.as_envelope(test, "tests")))
-
-    return run.finish(accepted=test is not None and test.passed,
-                      reason=f"the suite still failed after {MAX_FIX_LOOPS} fix attempt(s)")
-```
-
-`run.finish()` ends every ADW, and it takes the acceptance criterion the phase
-statuses cannot express. A test phase that ran a red suite **succeeded** — the
-runner did its job — so phases alone would report a green run that never passed
-its tests, in the db and the UI as well as the terminal. Pass `accepted=` and
-the exit code, the session status, and the banner are decided together.
-
-`quality.as_envelope` is the adapter: a deterministic result shaped as an envelope, so the builder cannot tell it came from code. Wire the real command in `quality.py` first — the stamped blocks are `echo` placeholders that announce themselves.
+Keep the loop in the shared module so adw-build, adw-simple-sdlc and generated
+builder chains retain identical delivery guarantees.
 
 Three distinctions worth keeping straight:
 
@@ -98,7 +74,7 @@ Three distinctions worth keeping straight:
 
 ## Keep scripts thin
 
-An ADW is sequencing and acceptance — nothing else. The moment you are writing parsing, subprocess handling, retry mechanics, or a reusable predicate inside `adw_*.py`, it belongs in `adw_modules/`. See `update_modules.md`.
+An ADW is sequencing and acceptance — nothing else. The moment you are writing parsing, subprocess handling, retry mechanics, or a reusable predicate inside `adw-*.py`, it belongs in `adw_modules/`. See `update_modules.md`.
 
 ## Route review verdicts
 

@@ -39,8 +39,8 @@ The installer writes a file-digest manifest at `.sssf/manifest.json` and a
 pre-install snapshot under `.sssf/backups/`. A repeated install is a no-op when
 the target is current.
 
-User-owned config, prompts, starter workflows, `quality.py`, `.env.sample`, and
-`justfile` are preserved. Managed runtime files update automatically only when
+User-owned config, prompts, starter workflows, `quality.py`, and `justfile` are
+preserved. Managed runtime files update automatically only when
 their current digest matches the previous manifest. A locally changed managed
 file stops the install before any write:
 
@@ -63,17 +63,19 @@ matching runtime state.
 | Target | Purpose | Ownership |
 |---|---|---|
 | `adws/adw_modules/` | runtime, gates, tracing, permissions, quality helpers | managed, except `quality.py` |
-| `adws/adw_*.py` | starter workflows | user-owned |
+| `adws/adw-*.py` | starter workflows | user-owned |
 | `adws/adw_sssf_config/sssf.config.yaml` | strict schema-v2 roster | user-owned |
 | `adws/adw_data/prompt_engineering/` | role prompts | user-owned |
 | `.codex/agents/sssf_recon.toml` | read-only child-agent role | managed |
-| `.env.sample` | optional API-key mode example | user-owned |
 | `justfile` | run and observe recipes | user-owned |
 | `.sssf/manifest.json` | installed file digests and distribution version | installer state |
 
-Runtime sessions and the trace database live under `adws/adw_data/` and are
-gitignored. A fresh installation does not require any legacy runtime, provider
-catalog, compatibility config, or historical session data.
+The installer gitignores its copied skill, installed runtime, state, Codex role,
+and recipes. Specification artifacts under `specs/` remain trackable and are the
+only SSSF artifacts intended for the target repository's history. It does not
+create an environment-variable example file. A fresh installation does not
+require any legacy runtime, provider catalog, compatibility config, or
+historical session data.
 
 ## Architecture
 
@@ -118,7 +120,7 @@ defaults:
   protected_files:
     - adws/adw_modules/
     - adws/adw_sssf_config/
-    - adws/adw_*.py
+    - adws/adw-*.py
   subagents:
     enabled: false
     max_concurrent: 6
@@ -198,21 +200,47 @@ provably separate counter. Cancelling a parent closes unfinished children.
 just prompt "summarize this repo"
 just scout "where is authentication handled?"
 just plan "add a health endpoint" --spec-dir specs/health-endpoint
-just plan-build "implement the approved plan" --spec specs/health-endpoint/spec.md
-just sdlc "plan, build, and test the change" --spec-dir specs/example
-just simple-sdlc "run plan, build, test, review, and document"
+just build --spec specs/health-endpoint/spec.md
+just simple-sdlc "run plan, build, test, review, and document" --spec-dir specs/example
 ```
 
 Generate a thin workflow from the configured roster:
 
 ```bash
 uv run .agents/skills/sssf/scripts/make_adw.py \
-  --name review_docs --agents scout,reviewer
+  --name review-docs --agents scout,reviewer
 ```
 
 Generated scripts pin the SDK, include `rich`, call `run.finish()`, and use a
 concrete output type for each built-in role. Replace the generated phase
 descriptions with task-specific intent before relying on the trace.
+
+## 工作流入口
+
+所有入口使用连字符，分发包含九个工作流：
+
+| 工作流 | 职责 |
+|---|---|
+| `adw-prompt` | 单次代理调用 |
+| `adw-scout` | 只读侦察 |
+| `adw-plan` | 生成或修订规格 |
+| `adw-decompose` | 将已有规格分票并生成索引 |
+| `adw-plan-decompose` | 规划并分票 |
+| `adw-build` | 已有 spec/ticket 或直接请求的完整交付 |
+| `adw-quality` | 独立运行适用质量检查 |
+| `adw-recheck` | 补证和复核；票据模式重新签发当前基线验收 |
+| `adw-simple-sdlc` | 规划后进入与 build 相同的完整交付链 |
+
+`adw-build` 与 `adw-simple-sdlc` 共用 `adw_modules/delivery.py`：
+配置预检 → builder → 必跑质量检查 → reviewer → 有限修复与重新验证 → documenter → 提交 → finish。
+票据模式随后签发 `ticket-acceptance.json`，签发失败返回非零退出码。
+直接文本请求会原样保存到 `specs/request-<adw_id>/spec.md`，提供稳定的审查和文档目标。
+执行前要求实现工作区干净；已有规格应采用 `specs/<key>/spec.md` 布局。
+
+质量模板不猜测项目命令。先配置 `quality.check_specs()`；不适用的项目检查通过
+`not_applicable_checks()` 声明理由，test 不能排除。缺少必跑命令时在代理调用前停止。
+修复后重跑必跑及已执行检查；文档和提交不得改变已验证的实现快照。
+规格与票据是目标模式，不存在单独的 ticket 工作流。
 
 ## Observability
 
@@ -257,10 +285,9 @@ defense-in-depth, not a substitute for repository isolation.
 Review blockers now carry structured ownership and closure conditions. The two
 review workflows distinguish builder repair from execution of configured checks;
 planning, environment, required manual and external blockers save a host-owned
-handoff and end unaccepted. Generated workflows stop before downstream delivery
-when review is unapproved. Check placeholders do not count as passing validation.
+handoff and end unaccepted. Generated workflows containing builder use the same complete delivery chain. Check placeholders do not count as passing validation.
 
-Use `uv run adws/adw_recheck.py recheck.json` for an explicit new evidence review
+Use `uv run adws/adw-recheck.py recheck.json` for an explicit new evidence review
 without rebuilding. It validates the original target, current baseline and proof,
 then runs required configured checks. See the [routing and recheck contract](.agents/skills/sssf/references/reviewer-routing.md)
 for kinds, budgets, request JSON, planning handoffs and existing-install updates.
@@ -300,19 +327,20 @@ changes. Python reads the planning metadata and atomically derives `index.json`.
 source binding and dependency relationships, without validating artifact formatting.
 
 ```bash
-uv run adws/adw_plan_decompose.py "add query and export capabilities"
-uv run adws/adw_decompose.py --spec specs/example/spec.md
-uv run adws/adw_build.py --spec specs/example/spec.md
-uv run adws/adw_build.py --ticket specs/example/spec.tickets/tickets/TICKET-QUERY.md \
+uv run adws/adw-plan-decompose.py "add query and export capabilities" --spec-dir specs/example
+uv run adws/adw-decompose.py --spec specs/example/spec.md
+uv run adws/adw-build.py --spec specs/example/spec.md
+uv run adws/adw-build.py --ticket specs/example/spec.tickets/tickets/TICKET-QUERY.md \
   --ticket-set specs/example/spec.tickets/ticket-set.md
 ```
 
 Use a new session for each ticket. Repairs retain the same work item and thread;
 changed definitions require revalidation and a new session. A ticket with blockers
 also needs `--dependency-evidence` referencing host acceptance records. Core accepts
-only evidence for the exact current implementation baseline; a custom ADW must
-revalidate evidence after baseline or environment changes. The build entry reports
-implementation only. The ADW owns checks, manual obligations and final acceptance.
+only evidence for the exact current implementation baseline. Use ticket mode in
+`adw-recheck` to rerun required checks and review after baseline/environment changes.
+`adw-build` performs the complete delivery chain and issues ticket acceptance only
+after checks, review, applicable manual evidence, documentation and commits succeed.
 See [the ticket contract](.agents/skills/sssf/references/tickets.md) and
 [upgrade instructions](.agents/skills/sssf/cookbooks/install.md).
 
@@ -321,8 +349,8 @@ See [the ticket contract](.agents/skills/sssf/references/tickets.md) and
 启动规划时显式选择新目录或已有规格：
 
 ```bash
-uv run adws/adw_plan.py "规划登录限流" --spec-dir specs/login-rate-limit
-uv run adws/adw_simple_sdlc.py "实现登录限流" --spec specs/login-rate-limit/spec.md
+uv run adws/adw-plan.py "规划登录限流" --spec-dir specs/login-rate-limit
+uv run adws/adw-simple-sdlc.py "实现登录限流" --spec specs/login-rate-limit/spec.md
 ```
 
 `spec.md` 定义目标，规格目录中的 `README.md` 汇总最近观察到的实现和验证现状，
@@ -330,3 +358,6 @@ uv run adws/adw_simple_sdlc.py "实现登录限流" --spec specs/login-rate-limi
 文档生成、工作流成功和完整规格验收分别记录；部分 ticket 完成不会自动验收整个规格。
 文稿发布失败可重放，已发布历史不可覆盖。详见
 [合同与恢复命令](.agents/skills/sssf/references/spec-artifacts.md)。
+
+票据重验的文档保存在会话目录中，不修改规格目录或创建提交。这样多个前置票据可以在
+同一个 HEAD 上重新验收，并共同作为下游依赖证据。正常 build 仍发布并提交规格执行文档。

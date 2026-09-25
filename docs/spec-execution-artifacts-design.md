@@ -28,7 +28,7 @@ documenter 每次完成记录时，同时追加本次执行报告并更新累计
 | templates/prompt_engineering/documenter/ | 基于 diff 生成一次性说明，在 app_docs/ 追加文件 | 读取规格、实现与证据，生成执行报告并更新累计现状 |
 | templates/adws/adw_modules/data_types.py | DocumentOutput 仅描述单份变更说明 | 扩展为两份文稿及发布结果，明确草稿与正式工件 |
 | templates/adws/adw_document.py | 原独立变更说明入口，模板已删除 | 移除该工作流，执行记录并入所属业务 ADW |
-| templates/adws/adw_simple_sdlc.py | documenter 仅在实施通过后的交付路径运行 | 正常交付与可控的未验收交接均可记录执行情况 |
+| templates/adws/adw-simple-sdlc.py | documenter 仅在实施通过后的交付路径运行 | 正常交付与可控的未验收交接均可记录执行情况 |
 | templates/sssf.config.yaml | documenter 可写 app_docs/ 及广泛 Markdown 路径 | 收敛为当前调用的文稿暂存区，由宿主发布正式工件 |
 | scripts/make_adw.py | documenter 沿 previous 接收上游信封 | 显式构建执行记录输入，接入共同发布流程 |
 

@@ -5,8 +5,8 @@
 """ADW Plan — one-shot planning workflow.
 
 Usage:
-    uv run adws/adw_plan.py "<prompt or path/to/prompt.md>" --spec-dir specs/example [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4]
-    uv run adws/adw_plan.py "<revision request>" --spec specs/example/spec.md
+    uv run adws/adw-plan.py "<prompt or path/to/prompt.md>" --spec-dir specs/example [--config adws/adw_sssf_config/sssf.config.yaml] [--adw-id a1b2c3d4]
+    uv run adws/adw-plan.py "<revision request>" --spec specs/example/spec.md
 
 Phases: engineer(request) -> planner
 """

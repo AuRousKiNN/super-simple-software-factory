@@ -46,7 +46,7 @@ def main(output: Path) -> int:
         "include the SSSF_RECON_OK marker in your handoff notes, then produce one behavior ticket.\n")
     execute("git-add", ["git", "add", "."])
     execute("git-commit", ["git", "commit", "-qm", "初始化合成拆解验收仓库"])
-    execute("decompose", [sys.executable, "adws/adw_decompose.py", "--spec", "specs/greeting.md",
+    execute("decompose", [sys.executable, "adws/adw-decompose.py", "--spec", "specs/greeting.md",
                           "--adw-id", "ticket-decompose"])
     set_path = "specs/greeting.tickets/ticket-set.md"
     index = json.loads((workspace / "specs/greeting.tickets/index.json").read_text())
@@ -59,7 +59,7 @@ def main(output: Path) -> int:
     children = end["payload"]["subagents"]
     if len(children) != 1 or children[0]["status"] != "completed":
         raise AssertionError(f"expected one completed recon child: {children}")
-    execute("build", [sys.executable, "adws/adw_build.py", "--ticket", selected["artifact"]["path"],
+    execute("build", [sys.executable, "adws/adw-build.py", "--ticket", selected["artifact"]["path"],
                       "--ticket-set", set_path, "--adw-id", "ticket-build"])
     if (workspace / "greeting.txt").read_bytes() != b"hello from ticket\n":
         raise AssertionError("builder did not deliver the selected ticket")

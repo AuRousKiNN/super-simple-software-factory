@@ -7,7 +7,7 @@ deterministic code step. Typed envelopes, explicit work-item/document contexts a
 
 ```text
 adws/
-├── adw_*.py                         workflow entry points
+├── adw-*.py                         workflow entry points
 ├── adw_modules/
 │   ├── agents.py                    config, prompts, retries, gates
 │   ├── agent_codex.py               SDK lifecycle and turns
@@ -38,13 +38,13 @@ Key invariants:
 Use the other cookbooks for an operation. Read deep references only when their
 subject is needed.
 
-Optional ticket flow: `adw_plan_decompose` creates a complete spec and validated
-planning set; `adw_decompose --spec` starts with the current spec. The build
+Optional ticket flow: `adw-plan-decompose` creates a complete spec and validated
+planning set; `adw-decompose --spec` starts with the current spec. The build
 entry accepts a direct request, `--spec`, or `--ticket` with `--ticket-set`.
 See [ticket contracts](../references/tickets.md) for evidence and session binding.
 
 Review ownership, bounded repair/verification, planning handoffs and the
-`adw_recheck.py` evidence-only entry are described in the
+`adw-recheck.py` evidence-only entry are described in the
 [Reviewer routing contract](../references/reviewer-routing.md).
 
 Each specification has a stable `specs/<spec_key>/` directory. The launching
@@ -52,3 +52,12 @@ agent chooses `--spec-dir` for new plans or `--spec` for revisions. `spec.md`
 defines the goal, `README.md` records observed progress, and `executions/` retains
 immutable execution history. Runtime owns metadata, acceptance provenance and
 the root index. See [specification artifacts](../references/spec-artifacts.md).
+
+## Delivery entries
+
+The nine entry points are adw-prompt, adw-scout, adw-plan, adw-decompose,
+adw-plan-decompose, adw-build, adw-quality, adw-recheck and adw-simple-sdlc.
+Build is the sole build-first entry and always executes checks, review, bounded
+repair, documentation and commit. Simple SDLC adds planning before the same chain.
+Ticket is a build/recheck input mode; successful full ticket validation issues
+current-HEAD acceptance. Configure applicable quality commands before agent work.

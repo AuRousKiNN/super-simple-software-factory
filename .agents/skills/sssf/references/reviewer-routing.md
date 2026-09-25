@@ -34,15 +34,15 @@ only when repair budget, verification budget and configured checks can close it.
 Budget exhaustion or missing capability saves a handoff rather than guessing a
 command or invoking a builder without a repairable problem.
 
-`adw_build_review.py` and `adw_simple_sdlc.py` allow three builder repairs and two
-supplementary verification rounds. Initial building is not a repair. SDLC runs
-its mandatory test suite before each review of changed builder output; previously
+`adw-build.py` and `adw-simple-sdlc.py` allow three builder repairs and two
+supplementary verification rounds. Initial building is not a repair. Both workflows run
+all applicable mandatory checks before reviewing changed builder output; previously
 executed supplementary checks are also renewed after edits. Each result carries
 the execution input fingerprint; later code/configuration changes invalidate its
 applicability even when the command exited successfully. Reviewer gate
 corrections have their own one-turn budget; JSON repair retains its separate
-runtime budget. Generated one-shot workflows provide no repair/verification loop:
-an unapproved review saves its reason and stops before downstream delivery.
+runtime budget. Generated builder workflows enter the same bounded delivery chain. Other generated
+review-only chains save an unapproved verdict and stop.
 
 ## Check configuration and acceptance
 
@@ -55,10 +55,9 @@ commands/logs, scope and assertions to assess evidence sufficiency.
 Approval plus applicable passing mandatory checks permits downstream delivery.
 SDLC commits implementation only after approval. It also publishes execution
 records for controlled handoffs, preserving the unaccepted result and leaving
-unfinished code uncommitted. These
-starter workflows do not publish ticket-acceptance records. Custom acceptance
-ADWs must establish all checks, manual validation, applicability and integrated
-obligations, finish accepted, and only then call `tickets.record_acceptance`.
+unfinished code uncommitted. Ticket-mode build and recheck establish all checks, required validation and
+applicability, finish accepted, then call `tickets.record_acceptance`. Required
+verification evidence must use real repository-relative file paths in ticket mode.
 
 ## Durable handoff and planning changes
 
@@ -104,7 +103,7 @@ For example (replace bracketed values):
 Invoke:
 
 ```bash
-uv run adws/adw_recheck.py recheck.json --config adws/adw_sssf_config/sssf.config.yaml
+uv run adws/adw-recheck.py recheck.json --config adws/adw_sssf_config/sssf.config.yaml
 ```
 
 This entry always creates a new session, validates the source receipt/target
@@ -117,11 +116,13 @@ all inherited obligations and evidence applicability even when code is unchanged
 Ignored external/environment inputs are covered by explicit applicability claims
 and independent review, not by the Git file fingerprint.
 
-A ticket recheck retains the existing conservative dependency-evidence rules:
-stale dependency HEAD or dirty prerequisite baseline needs an explicit custom
-revalidation/acceptance workflow first. Core does not waive these constraints.
-The recheck result is a new receipt and a run verdict, not automatic continuation
-of the earlier program counter or issuance of a ticket-acceptance record.
+A ticket recheck accepts both blocked and approved source reviews. It retains exact
+HEAD dependency rules: supply refreshed `dependency_evidence` in the JSON request
+when prerequisites were revalidated. Run prerequisite rechecks in topological order.
+An approved source may use `evidence: []`; every applicable check is rerun and the
+reviewer reassesses all obligations. Successful ticket recheck records documentation inside the session, leaves HEAD
+unchanged, finishes and publishes a new current-baseline ticket acceptance. It never resumes
+an old program counter or promotes a ticket to whole-spec integration acceptance.
 
 ## Existing installations
 
@@ -137,3 +138,6 @@ results, review receipt and supplied evidence through `DocumentRequest`. Empty
 implementation diffs are valid and never fall back to the preceding commit.
 Generated documentation and recheck acceptance do not independently establish
 whole-spec integration acceptance. See [spec artifacts](spec-artifacts.md).
+
+票据重验的文档保存在会话目录中，不修改规格目录或创建提交。这样多个前置票据可以在
+同一个 HEAD 上重新验收，并共同作为下游依赖证据。正常 build 仍发布并提交规格执行文档。

@@ -14,9 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / ".agents/skills/sssf"
 sys.path.insert(0, str(SKILL / "templates/adws"))
 
-import adw_build_review
-import adw_recheck
-import adw_simple_sdlc
+adw_build = __import__("adw-build")
+adw_recheck = __import__("adw-recheck")
+adw_simple_sdlc = __import__("adw-simple-sdlc")
 from adw_modules import agents, gates, permissions, quality, review_routing as routing, tickets
 from adw_modules.codex_schema import strict_output_schema
 from adw_modules.data_types import (
@@ -205,7 +205,7 @@ class Flow:
         return 0 if accepted else 1
 
 
-def setup_flow(monkeypatch, repo, reviews, module=adw_build_review):
+def setup_flow(monkeypatch, repo, reviews, module=adw_build):
     monkeypatch.chdir(repo)
     run = Flow(repo, reviews)
     monkeypatch.setattr(module.agents, "load_config", lambda _: run.cfg)
@@ -220,8 +220,8 @@ def setup_flow(monkeypatch, repo, reviews, module=adw_build_review):
 @pytest.mark.parametrize("kind", ["spec_conflict", "ticket_conflict", "environment", "manual_validation", "external_regression", "protocol_issue"])
 def test_blocked_workflow_stops_without_builder_repair(monkeypatch, repo, kind):
     run = setup_flow(monkeypatch, repo, [review(blocker(kind))])
-    assert adw_build_review.main("Implement collection") == 1
-    assert [p.owner for p, c in run.calls] == ["builder", "reviewer"]
+    assert adw_build.main("Implement collection") == 1
+    assert [p.owner for p, c in run.calls] == ["builder", "reviewer", "documenter"]
     receipt_path = next((run.session_dir / "review-routing").glob("*.json"))
     receipt = routing.ReviewReceipt.model_validate_json(receipt_path.read_text())
     assert receipt.review.blocking[0].kind == kind
@@ -231,17 +231,17 @@ def test_blocked_workflow_stops_without_builder_repair(monkeypatch, repo, kind):
 
 def test_repairs_and_verifications_use_separate_budgets(monkeypatch, repo):
     run = setup_flow(monkeypatch, repo, [review(blocker("check_execution")), review(blocker()), review()])
-    assert adw_build_review.main("Implement collection") == 0
+    assert adw_build.main("Implement collection") == 0
     names = [p.params.name for p in run.phases]
-    assert names.index("verify_1") < names.index("review_2") < names.index("revise_1") < names.index("verify_2") < names.index("review_3")
+    assert names.index("checks_2") < names.index("review_2") < names.index("revise_1") < names.index("checks_3") < names.index("review_3")
     assert len(list((run.session_dir / "review-routing").glob("*.json"))) == 3
-    assert json.loads(next((run.session_dir / "review-routing").glob("*.json")).read_text())["review"]["blocking"]
+    assert json.loads(sorted((run.session_dir / "review-routing").glob("*.json"))[0].read_text())["review"]["blocking"]
 
 
-@pytest.mark.parametrize("kind,phase_prefix,budget", [("implementation", "revise_", 3), ("check_execution", "verify_", 2)])
+@pytest.mark.parametrize("kind,phase_prefix,budget", [("implementation", "revise_", 3), ("check_execution", "checks_", 3)])
 def test_loop_limits_count_actual_actions(monkeypatch, repo, kind, phase_prefix, budget):
     run = setup_flow(monkeypatch, repo, [review(blocker(kind))] * 8)
-    assert adw_build_review.main("Implement collection") == 1
+    assert adw_build.main("Implement collection") == 1
     assert sum(p.params.name.startswith(phase_prefix) for p in run.phases) == budget
     assert "budget" in run.reason
 
@@ -250,7 +250,7 @@ def test_sdlc_retests_before_review_and_commits_only_approved_code(monkeypatch, 
     run = setup_flow(monkeypatch, repo, [review(blocker()), review()], adw_simple_sdlc)
     assert adw_simple_sdlc.main("Implement collection", target=PlanningTarget(spec_dir="specs/collection")) == 0
     names = [p.params.name for p in run.phases]
-    assert names.index("revise_1") < names.index("test_2") < names.index("review_2") < names.index("commit_build") < names.index("document")
+    assert names.index("revise_1") < names.index("checks_2") < names.index("review_2") < names.index("document") < names.index("commit_delivery")
     review_calls = [c for p, c in run.calls if p.owner == "reviewer"]
     assert "required assertions executed" in review_calls[-1].previous.notes_for_next_agent
     assert review_calls[0].work_item == review_calls[1].work_item
@@ -349,13 +349,18 @@ def test_recheck_changed_code_requires_current_checks(monkeypatch, repo):
 def test_generated_chain_stops_or_delivers_on_verdict(monkeypatch, repo, approved):
     subprocess.run([sys.executable, str(SKILL / "scripts/make_adw.py"), "--name", "generated",
                     "--agents", "builder,reviewer,documenter"], cwd=repo, check=True, capture_output=True)
-    spec = importlib.util.spec_from_file_location("generated", repo / "adws/adw_generated.py")
+    git(repo, "add", "adws")
+    git(repo, "commit", "-qm", "记录生成的工作流")
+    spec = importlib.util.spec_from_file_location("generated", repo / "adws/adw-generated.py")
     module = importlib.util.module_from_spec(spec)
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
     spec.loader.exec_module(module)
-    output = review() if approved else review(blocker())
+    output = review() if approved else review(blocker("environment"))
     run = setup_flow(monkeypatch, repo, [output], module)
     (repo / "specs/collection").mkdir(parents=True)
     (repo / "specs/collection/spec.md").write_text("---\nrevision: 1\n---\nREQ-1")
+    git(repo, "add", "specs")
+    git(repo, "commit", "-qm", "记录交付规格")
     assert module.main("Implement collection", WorkflowOptions(spec="specs/collection/spec.md")) == (0 if approved else 1)
     assert any(p.owner == "documenter" for p, c in run.calls)
     assert run.closed

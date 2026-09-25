@@ -314,7 +314,7 @@ def bind_work_item(run, call, role: str = "builder"):
         protected = validate_work_item(run, item, check_tree=not saved.exists())
         if not saved.exists():
             atomic_json(saved, item.model_dump())
-        if item.spec.path.startswith("specs/") and item.spec.path.endswith("/spec.md") and role in {"builder", "reviewer"}:
+        if item.spec.path.startswith("specs/") and item.spec.path.endswith("/spec.md") and role in {"builder", "reviewer"} and not getattr(run, "evidence_only", False):
             from . import spec_artifacts
             spec_artifacts.mark_unsynced(run, item)
         return item, protected
@@ -350,7 +350,15 @@ def _record_acceptance(run, record: AcceptanceRecord) -> ArtifactRef:
     for ref in (item.spec, item.ticket_set, item.ticket, item.index,
                 *record.checks, *record.reviews, *record.manual_validation):
         verify_ref(run.repo_root, ref)
+    manifest = run.session_dir / "delivery-evidence.json"
+    if manifest.exists():
+        from . import review_routing
+        verified = json.loads(manifest.read_text())
+        if verified["tree_sha256"] != review_routing.tree_digest(review_routing.tree_files(run)):
+            raise TicketError("implementation changed since delivery verification")
     path = run.session_dir / "ticket-acceptance.json"
+    if path.exists() and AcceptanceRecord.model_validate_json(path.read_text()) != record:
+        raise TicketError("immutable ticket acceptance already exists; revalidate in a fresh session")
     atomic_json(path, record.model_dump())
     return artifact(run.repo_root, path.resolve().relative_to(run.repo_root.resolve()).as_posix(), ".json")
 

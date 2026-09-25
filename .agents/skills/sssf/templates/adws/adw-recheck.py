@@ -5,20 +5,20 @@
 """ADW Recheck — validate new evidence, run configured checks, review the same target.
 
 Usage:
-    uv run adws/adw_recheck.py path/to/recheck.json [--config adws/adw_sssf_config/sssf.config.yaml]
+    uv run adws/adw-recheck.py path/to/recheck.json [--config adws/adw_sssf_config/sssf.config.yaml]
 
 Phases: code(recheck_input) -> [code(checks)] -> code(changes) -> reviewer -> code(route)
         -> [code(checks) -> code(changes) -> reviewer -> code(route)] bounded
 
-Always creates a new session. Does not invoke a builder, commit, or issue ticket
-acceptance records; a custom acceptance ADW must establish its complete obligations.
+Always creates a new session without a builder. Ticket mode reruns required checks,
+reviews all obligations, saves session documentation and issues current-HEAD acceptance without advancing HEAD.
 """
 import argparse
 import sys
 from pathlib import Path
 
-from adw_modules import agents, changes, gates, quality, review_routing, session, spec_artifacts, tickets
-from adw_modules.data_types import AgentCall, ChangeCapture, DocumentRequest, PhaseParams, RecheckRequest, ReviewOutput
+from adw_modules import delivery, agents, changes, gates, quality, review_routing, session, spec_artifacts, tickets
+from adw_modules.data_types import TicketWorkItem, AgentCall, ChangeCapture, DocumentRequest, PhaseParams, RecheckRequest, ReviewOutput
 
 REQUIRED_AGENTS = ["reviewer", "documenter"]
 MAX_VERIFICATION_LOOPS = 2
@@ -78,6 +78,11 @@ def main(request_path: str, config: str = "adws/adw_sssf_config/sssf.config.yaml
                 sorted(set(prepared.checks) | set(results))))
             ph.log(receipt=str(receipt), **decision.model_dump())
         if decision.action != "verify":
+            if isinstance(prepared.source.work_item, TicketWorkItem):
+                return delivery.complete(run, delivery.DeliveryEvidence(
+                    delivery.DeliveryRequest(prepared.source.prompt, prepared.source.work_item, prepared.source.build_base),
+                    review, receipt, results, prepared.checks, decision,
+                    "记录票据重验与当前基线验收", tuple(e.artifact for e in request.evidence), recheck=True))
             document = spec_artifacts.document(run, DocumentRequest(
                 work_item=prepared.source.work_item, purpose="记录补证与复核结果。" + decision.reason,
                 changes=previous, checks=list(results.values()), review=review,

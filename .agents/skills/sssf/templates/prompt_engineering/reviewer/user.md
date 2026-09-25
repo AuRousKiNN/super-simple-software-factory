@@ -34,7 +34,10 @@
    actual gap; distinguish missing proof from missing extra tests.
 4. Classify every blocker using the exact system kind/owner pairs. List all assigned
    mandatory obligations in required_verification, preserving source obligations
-   during recheck and evaluating the newly supplied evidence.
+   during recheck and evaluating the newly supplied evidence. In ticket mode,
+   required_verification.evidence must name actual repository-relative files,
+   without line suffixes or prose. Explain applicability and any non-applicable
+   quality checks in the report; never invent manual execution evidence.
 5. Write `<context_handoff_dir>/review.md` using the guidance below, then emit your
    Report JSON. Keep test execution and final acceptance with their owning phases.
 

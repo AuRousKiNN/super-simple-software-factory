@@ -74,3 +74,13 @@ can rebuild navigation from current managed artifacts without importing sessions
 into SQLite. Static files describe the last observation and do not update while
 no workflow or refresh command is running. Missing historical logs limit evidence
 reuse; Markdown summaries are not original acceptance evidence.
+
+## Ticket recheck records
+
+Ticket-mode `adw-recheck` uses `DocumentRequest.session_only=True`. It publishes
+its report and overview under `<session>/documentation/`, then synchronizes run
+facts there without updating the repository index or committing. This preserves
+one exact HEAD for multiple prerequisite acceptances. Ordinary build and planned
+delivery still publish and commit the canonical specification execution documents.
+The original scope observation remains historical; current dependency acceptance
+comes from the new session's `ticket-acceptance.json`.

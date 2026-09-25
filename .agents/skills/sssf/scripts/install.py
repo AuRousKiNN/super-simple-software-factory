@@ -34,12 +34,12 @@ MANIFEST_PATH = Path(".sssf/manifest.json")
 BACKUP_ROOT = Path(".sssf/backups")
 
 GITIGNORE_ENTRIES = (
-    "adws/adw_data/sessions/",
-    "adws/adw_data/sssf.db*",
-    ".sssf/backups/",
-    ".env",
-    "__pycache__/",
-    "*.pyc",
+    "/.agents/skills/sssf/",
+    "/.codex/agents/sssf_recon.toml",
+    "/.sssf/",
+    "/adws/",
+    "/justfile",
+    "/.env",
 )
 
 # A snapshot is made before these known retired files are removed.
@@ -95,13 +95,12 @@ def _is_user_owned(relative: Path) -> bool:
     value = relative.as_posix()
     return (
         value == "adws/adw_sssf_config/sssf.config.yaml"
-        or value == ".env.sample"
         or value == "justfile"
         or value == "adws/adw_modules/quality.py"
         or value.startswith("adws/adw_data/prompt_engineering/")
         or (
             value.startswith("adws/")
-            and relative.name.startswith("adw_")
+            and relative.name.startswith("adw-")
             and relative.parent == Path("adws")
         )
     )
@@ -137,7 +136,7 @@ def _gitignore_source(root: Path) -> SourceFile:
     if missing:
         if text and not text.endswith("\n"):
             text += "\n"
-        text += "\n# sssf runtime\n" + "\n".join(missing) + "\n"
+        text += "\n# sssf installation (specs/ stays trackable)\n" + "\n".join(missing) + "\n"
     return SourceFile(Path(".gitignore"), text.encode(), 0o644, "user")
 
 
@@ -157,7 +156,6 @@ def collect_sources(root: Path) -> dict[Path, SourceFile]:
             TEMPLATES / "sssf.config.yaml",
             Path("adws/adw_sssf_config/sssf.config.yaml"),
         ),
-        (TEMPLATES / "env.sample", Path(".env.sample")),
         (TEMPLATES / "justfile", Path("justfile")),
     ):
         item = _source_file(source, relative)
@@ -189,6 +187,16 @@ def _read_json(path: Path) -> dict:
     if not isinstance(payload, dict):
         raise RuntimeError(f"{path} must contain a JSON object")
     return payload
+
+
+# Only untouched recorded legacy entries are retired automatically; customized
+# workflows require an explicit merge and are never erased by --force-managed.
+RETIRED_WORKFLOWS = tuple(Path("adws/" + name + ".py") for name in (
+    "adw_prompt", "adw_scout", "adw_plan", "adw_decompose", "adw_plan_decompose",
+    "adw_build", "adw_build_test", "adw_build_review", "adw_plan_build",
+    "adw_plan_build_test", "adw_plan_build_test_quality", "adw_quality", "adw_recheck", "adw_simple_sdlc",
+    "adw-build-test", "adw-build-review", "adw-plan-build", "adw-plan-build-test", "adw-plan-build-test-quality",
+))
 
 
 def _safe_relative(value: str) -> Path:
@@ -245,6 +253,16 @@ def plan_install(
                 actions.append(Action("remove", relative))
             else:
                 conflicts.append(relative)
+
+    for relative in RETIRED_WORKFLOWS:
+        if not (root / relative).exists():
+            continue
+        prior = previous.get(relative.as_posix(), {}) if isinstance(previous, dict) else {}
+        if prior.get("digest") == _digest(root / relative):
+            if not any(action.relative == relative for action in actions):
+                actions.append(Action("remove", relative))
+        else:
+            conflicts.append(relative)
 
     for relative in REMOVED_IN_M4:
         if (root / relative).exists() and not any(
@@ -498,11 +516,11 @@ def main(argv: list[str] | None = None) -> int:
             root, sources, force_managed=args.force_managed,
         )
         if conflicts:
-            print("sssf installation stopped; managed files have local changes:")
+            print("sssf installation stopped; managed files or retired workflows need an explicit merge:")
             for relative in conflicts:
                 print(f"  ! {relative}")
             print(
-                "merge them explicitly, or rerun with --force-managed "
+                "merge retired workflows explicitly; for managed runtime conflicts only, rerun with --force-managed "
                 "after reviewing the conflicts; a pre-write backup will be created"
             )
             return 2
@@ -538,13 +556,15 @@ def main(argv: list[str] | None = None) -> int:
     print("  Add decomposer + recon; planner spec_path; builder/reviewer {{work_item}};")
     print("  concrete output types and unchanged work_item in repair/review calls.")
     print("  See .agents/skills/sssf/cookbooks/install.md and references/tickets.md.")
+    print("\nworkflow upgrade: nine hyphenated entries; build uses shared full delivery.")
+    print("  Merge preserved quality.required_checks/not_applicable_checks and update justfile commands.")
     print("\nnext steps:")
     print("  1. codex --version && codex login status")
     print("  2. just demo")
     print("  3. just sessions")
     print("  4. just obs")
     print("\nno just? run:")
-    print('  uv run adws/adw_prompt.py "summarize this repo" --agent scout')
+    print('  uv run adws/adw-prompt.py "summarize this repo" --agent scout')
     return 0
 
 

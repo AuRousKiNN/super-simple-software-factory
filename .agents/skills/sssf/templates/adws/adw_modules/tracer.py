@@ -22,7 +22,7 @@ CREATE TABLE schema_meta (
 INSERT INTO schema_meta (singleton, schema_version) VALUES (1, 2);
 CREATE TABLE IF NOT EXISTS sessions (
   adw_id        TEXT PRIMARY KEY,
-  adw_name      TEXT,                -- ADW script(s) run, e.g. "adw_plan + adw_build_test"
+  adw_name      TEXT,                -- ADW script(s) run, e.g. "adw-plan + adw-build"
   request       TEXT,
   status        TEXT,
   engineer      TEXT,

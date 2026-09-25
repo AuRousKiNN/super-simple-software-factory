@@ -260,7 +260,8 @@ class RecheckRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     original_review: ArtifactRef
     baseline: str = Field(min_length=1)
-    evidence: list[RecheckEvidence] = Field(min_length=1)
+    evidence: list[RecheckEvidence] = Field(default_factory=list)
+    dependency_evidence: list[ArtifactRef] | None = None
     checks: list[str] = Field(default_factory=list)
 
 
@@ -424,6 +425,7 @@ class DocumentRequest(BaseModel):
     review_receipt: ArtifactRef | None = None
     evidence: list[ArtifactRef] = Field(default_factory=list)
     record_requested: bool = True
+    session_only: bool = False
 
 
 class DocumentContext(DocumentRequest):
@@ -549,7 +551,7 @@ class ConfigDefaults(StrictConfigModel):
     # The factory's own code is the default: an agent must not be able to edit
     # the machinery that decides whether its work passed.
     protected_files: list[str] = Field(default_factory=lambda: [
-        "adws/adw_modules/", "adws/adw_sssf_config/", "adws/adw_*.py", "adws/spec_artifacts_cli.py",
+        "adws/adw_modules/", "adws/adw_sssf_config/", "adws/adw-*.py", "adws/spec_artifacts_cli.py",
     ])
     data_dir: str = "adws/adw_data"
 
@@ -751,3 +753,4 @@ class FinishOptions(BaseModel):
     receipt: ArtifactRef | None = None
     accepts_scope: bool = False
     commit: bool = False
+    session_only: bool = False

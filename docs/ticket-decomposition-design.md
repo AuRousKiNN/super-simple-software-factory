@@ -312,8 +312,8 @@ builder 将当前根 spec、完整 ticket 集合和索引作为只读输入。pe
 
 新增：
 
-- `adw_decompose`：明确 spec → decomposer → code 校验/生成索引。
-- `adw_plan_decompose`：request → planner → decomposer → code 校验/生成索引。
+- `adw-decompose`：明确 spec → decomposer → code 校验/生成索引。
+- `adw-plan-decompose`：request → planner → decomposer → code 校验/生成索引。
 
 builder 入口提供三种互斥模式：
 
@@ -369,7 +369,7 @@ fail envelope 持久化后终止当前阶段。上层根据保存的结构化原
 | templates/adws/adw_modules/agents.py | 渲染 work_item；将 decomposer 加入 _SUBAGENT_PARENT_ROLES，更新校验和提示 |
 | templates/adws/adw_modules/permissions.py | 本次输出范围和输入只读保护 |
 | templates/adws/adw_modules/runner.py | builder 目标绑定与恢复检查 |
-| templates/adws/adw_*.py | 新增拆解入口；接入双输入和修复目标 |
+| templates/adws/adw-*.py | 新增拆解入口；接入双输入和修复目标 |
 | scripts/make_adw.py | 新增输出类型映射，装配明确的 ticket 目标 |
 | scripts/install.py 及升级说明 | 分发新文件，提供配置和提示词合并指引 |
 | SKILL.md、cookbooks、references、README 和导览 | 同步角色、ticket 契约和 planner/scout/decomposer 的 recon 权限 |

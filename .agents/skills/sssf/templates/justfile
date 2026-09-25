@@ -8,7 +8,7 @@
 set dotenv-load
 set positional-arguments
 
-# Every recipe passes this through, so `SSSF_CONFIG=other.yaml just sdlc "..."`
+# Every recipe passes this through, so `SSSF_CONFIG=other.yaml just simple-sdlc "..."`
 # swaps the whole roster for one run.
 config := env_var_or_default("SSSF_CONFIG", "adws/adw_sssf_config/sssf.config.yaml")
 db     := "adws/adw_data/sssf.db"
@@ -27,10 +27,10 @@ default:
 
 # start here: two cheap read-only runs, end to end
 demo:
-    @echo "1/2  adw_prompt: one agent, one prompt"
-    uv run adws/adw_prompt.py --config {{config}} --agent scout "reply with a one-line summary of this repo"
-    @echo "\n2/2  adw_scout: read-only recon"
-    uv run adws/adw_scout.py --config {{config}} "list the top-level directories in this repo and what each is for. change nothing."
+    @echo "1/2  adw-prompt: one agent, one prompt"
+    uv run adws/adw-prompt.py --config {{config}} --agent scout "reply with a one-line summary of this repo"
+    @echo "\n2/2  adw-scout: read-only recon"
+    uv run adws/adw-scout.py --config {{config}} "list the top-level directories in this repo and what each is for. change nothing."
     @echo "\nboth done. now run:  just sessions    (or: just obs)"
 
 # ── run a workflow ──────────────────────────────────────────────────────────
@@ -38,39 +38,39 @@ demo:
 
 # one agent, one prompt: just prompt "summarize this repo"
 prompt *ARGS:
-    uv run adws/adw_prompt.py --config {{config}} "$@"
+    uv run adws/adw-prompt.py --config {{config}} "$@"
 
 # read-only recon: just scout "where is auth handled"
 scout *ARGS:
-    uv run adws/adw_scout.py --config {{config}} "$@"
+    uv run adws/adw-scout.py --config {{config}} "$@"
 
 # plan only: just plan "add a /health endpoint" --spec-dir specs/health-endpoint
 plan *ARGS:
-    uv run adws/adw_plan.py --config {{config}} "$@"
+    uv run adws/adw-plan.py --config {{config}} "$@"
 
 # decompose an archived spec: just decompose --spec specs/example/spec.md
 decompose *ARGS:
-    uv run adws/adw_decompose.py --config {{config}} "$@"
+    uv run adws/adw-decompose.py --config {{config}} "$@"
 
 # request to root spec and validated tickets: just plan-decompose "add export" --spec-dir specs/export
 plan-decompose *ARGS:
-    uv run adws/adw_plan_decompose.py --config {{config}} "$@"
+    uv run adws/adw-plan-decompose.py --config {{config}} "$@"
 
 # direct request, whole spec, or explicit ticket implementation
 build *ARGS:
-    uv run adws/adw_build.py --config {{config}} "$@"
+    uv run adws/adw-build.py --config {{config}} "$@"
 
-# planner, builder, commit: just plan-build "add a /health endpoint" --spec-dir specs/health-endpoint
-plan-build *ARGS:
-    uv run adws/adw_plan_build.py --config {{config}} "$@"
+# independently execute configured quality checks
+quality *ARGS:
+    uv run adws/adw-quality.py --config {{config}} "$@"
 
-# plan, build, test, commit: just sdlc "add a /health endpoint" --spec-dir specs/health-endpoint
-sdlc *ARGS:
-    uv run adws/adw_plan_build_test.py --config {{config}} "$@"
+# revalidate an original review and supplied evidence
+recheck *ARGS:
+    uv run adws/adw-recheck.py --config {{config}} "$@"
 
 # the full chain, plus review and docs: just simple-sdlc "add a /health endpoint" --spec-dir specs/health-endpoint
 simple-sdlc *ARGS:
-    uv run adws/adw_simple_sdlc.py --config {{config}} "$@"
+    uv run adws/adw-simple-sdlc.py --config {{config}} "$@"
 
 # ── watch it ────────────────────────────────────────────────────────────────
 # Reads never block a running workflow, the db is WAL. Poll as hard as you like.

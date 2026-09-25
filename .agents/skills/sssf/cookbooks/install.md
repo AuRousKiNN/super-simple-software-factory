@@ -11,12 +11,18 @@ access. `just` is optional; Bun is needed only for the visualizer.
 
 The installer classifies files before writing:
 
-- config, prompts, workflows, `quality.py`, `.env.sample`, and `justfile` are
+- config, prompts, workflows, `quality.py`, and `justfile` are
   user-owned and are preserved when already present;
 - runtime modules and the read-only child role are managed;
 - managed updates apply automatically only when the current digest matches the
   previous `.sssf/manifest.json` entry;
 - managed local edits stop the entire install before any write.
+
+The installer adds the SSSF machinery (`.agents/skills/sssf/`, `adws/`,
+`.sssf/`, the SSSF Codex role, and the installed `justfile`) to `.gitignore`.
+Specification artifacts under `specs/` remain trackable and are the only SSSF
+artifacts intended for the target repository's history. The installer does not
+create an environment-variable example file.
 
 Every changing install creates `.sssf/backups/<snapshot>/`. The snapshot covers
 all touched targets plus the active config and SQLite database files. A write
@@ -53,7 +59,7 @@ just sessions
 Without `just`, run:
 
 ```bash
-uv run adws/adw_prompt.py "summarize this repo" --agent scout
+uv run adws/adw-prompt.py "summarize this repo" --agent scout
 ```
 
 A green smoke means config preflight, thread creation, structured output,
@@ -95,10 +101,10 @@ structured ReviewBlocker entries. Preserve local commands when moving them into
 
 Merge preserved ADWs, planner/documenter prompts and roster together. Planning
 requires `--spec-dir` or `--spec`; new specs use `specs/<spec_key>/spec.md`.
-Compare every installed `adw_plan*.py` and any other planner chain (including
-`adw_simple_sdlc.py`) with its current template. Merge the required mutually
+Compare every installed `adw-plan*.py` and any other planner chain (including
+`adw-simple-sdlc.py`) with its current template. Merge the required mutually
 exclusive CLI target arguments, `PlanningTarget` construction, and
-`AgentCall.planning_target` together. For `adw_plan_decompose`, forward the
+`AgentCall.planning_target` together. For `adw-plan-decompose`, forward the
 planner's `plan.spec_path` to `tickets.decompose`; the ticket directory becomes
 `specs/<spec_key>/spec.tickets/`. Verify each merged script with `--help` before
 launch: its usage must show `(--spec-dir SPEC_DIR | --spec SPEC)`. Updating this
@@ -112,3 +118,21 @@ calls to that standalone workflow. Existing user-owned ADWs are not overwritten.
 Do not use a flat old spec as a new-layout publication target: explicitly migrate
 its spec/ticket paths and verify references before starting a new session.
 See [spec artifact contract](../references/spec-artifacts.md).
+
+## Workflow consolidation and hyphenated entry points
+
+The distribution ships nine `adw-*.py` entries. `adw-build` is the only build-first
+entry and includes checks, review, bounded repairs, documentation and commits.
+`adw-simple-sdlc` plans before entering that same shared delivery chain.
+Build-test, build-review and all three plan-build variants are retired.
+
+The installer removes recorded, untouched legacy workflow files with transactional
+backup. Customized or unrecorded legacy files are reported as conflicts even with
+`--force-managed`: review and merge them into the new entry, then move the old file
+out of the active ADW directory before installing again. New hyphenated workflows
+remain user-owned. Update custom launch scripts and preserved justfile recipes.
+
+Merge `quality.required_checks()` and `quality.not_applicable_checks()` alongside
+the project's real command registry: quality.py is preserved on upgrade. Update
+reviewer prompts so ticket required-verification evidence names actual files.
+No generic distribution can infer the target repository's correct test command.

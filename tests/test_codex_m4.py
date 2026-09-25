@@ -81,6 +81,56 @@ def test_fresh_install_is_repeatable_and_records_manifest(tmp_path: Path) -> Non
     assert (target / "adws/adw_modules/agents.py").is_file()
     assert not (target / "adws/adw_modules/agents_codex.py").exists()
     assert not (target / "adws/adw_data/harness_engineering").exists()
+    assert not (target / ".env.example").exists()
+    assert not (target / ".env.sample").exists()
+    ignored = (target / ".gitignore").read_text().splitlines()
+    assert {
+        "/.agents/skills/sssf/",
+        "/.codex/agents/sssf_recon.toml",
+        "/.sssf/",
+        "/adws/",
+        "/justfile",
+        "/.env",
+    } <= set(ignored)
+    assert "/specs/" not in ignored
+    assert "specs/" not in ignored
+    spec = target / "specs/example/spec.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# Track me\n")
+    initialized = subprocess.run(
+        ["git", "init"], cwd=target, capture_output=True, text=True, check=False,
+    )
+    assert initialized.returncode == 0, initialized.stderr
+    ignored_result = subprocess.run(
+        [
+            "git", "check-ignore", "--no-index",
+            ".sssf/manifest.json",
+            "adws/adw_modules/agents.py",
+            ".codex/agents/sssf_recon.toml",
+            "justfile",
+            ".agents/skills/sssf/SKILL.md",
+        ],
+        cwd=target,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ignored_result.returncode == 0, ignored_result.stderr
+    assert set(ignored_result.stdout.splitlines()) == {
+        ".sssf/manifest.json",
+        "adws/adw_modules/agents.py",
+        ".codex/agents/sssf_recon.toml",
+        "justfile",
+        ".agents/skills/sssf/SKILL.md",
+    }
+    tracked_spec = subprocess.run(
+        ["git", "check-ignore", "--no-index", "specs/example/spec.md"],
+        cwd=target,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert tracked_spec.returncode == 1, tracked_spec.stdout + tracked_spec.stderr
     before = manifest_path.read_bytes()
     snapshots = list((target / ".sssf/backups").iterdir())
 
@@ -197,13 +247,13 @@ def test_generated_adw_uses_pinned_sdk_rich_and_run_finish(tmp_path: Path) -> No
         cwd=target,
     )
     assert generated.returncode == 0, generated.stderr + generated.stdout
-    script = target / "adws/adw_m4_smoke.py"
+    script = target / "adws/adw-m4-smoke.py"
     text = script.read_text()
     assert '"openai-codex==0.155.1"' in text
     assert '"rich"' in text
     assert "return run.finish(accepted=accepted" in text
-    assert "builder -> code(changes)" in text
-    assert "changes.capture(run, ChangeCapture(base=build_base))" in text
+    assert "builder -> code(checks) -> reviewer" in text
+    assert "delivery.execute(run" in text
     assert "run.succeeded" not in text
     compile(text, str(script), "exec")
     launched = subprocess.run(

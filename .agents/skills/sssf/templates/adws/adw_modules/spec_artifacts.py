@@ -257,8 +257,16 @@ def prepare(run, request: DocumentRequest, phase: str = "document") -> DocumentC
     if not request.record_requested and not (request.checks or request.review or request.review_receipt or request.evidence or (request.changes and request.changes.changed_files)):
         return None
     directory = _layout(run, request.work_item.spec.path)
-    initialize(run, request.work_item.spec)
-    overview_path = relative(run, directory / "README.md")
+    if request.session_only:
+        # Rechecking several prerequisite tickets must not advance HEAD between them.
+        publication_dir = run.session_dir / "documentation"
+        original = directory / "README.md"
+        _write(publication_dir / "README.md", original.read_text() if original.exists()
+               else _page({"acceptance": {}, "stale_reasons": []}, "本次会话的票据重验记录。"))
+    else:
+        initialize(run, request.work_item.spec)
+        publication_dir = directory
+    overview_path = relative(run, publication_dir / "README.md")
     execution_id = re.sub(r"[^A-Za-z0-9_-]", "-", phase) + "-" + new_id(12)
     invocation = run.session_dir / "documenter" / "invocations" / ("inv_" + new_id(12))
     reports = invocation / "reports"
@@ -301,7 +309,7 @@ def prepare(run, request: DocumentRequest, phase: str = "document") -> DocumentC
         execution_id=execution_id, invocation_dir=relative(run, invocation),
         execution_draft_path=relative(run, reports / "execution.md"),
         overview_draft_path=relative(run, reports / "overview.md"),
-        document_path=relative(run, directory / "executions" / run.adw_id / f"{execution_id}.md"),
+        document_path=relative(run, publication_dir / "executions" / run.adw_id / f"{execution_id}.md"),
         overview_path=overview_path)
     for ref in _refs(context):
         tickets.verify_ref(run.repo_root, ref)
@@ -390,11 +398,16 @@ def publish(run, context: DocumentContext, draft: DocumentDraftOutput) -> Docume
         "observed_at": context.observed_at, "scope": scope, "finish": "待完成",
         "sources": [r.model_dump() for r in _refs(context)],
         "body_sha256": digest(_path(run, draft.execution_draft_path).read_text())}
-    execution = "---\n" + yaml.safe_dump(execution_meta, allow_unicode=True, sort_keys=True) + "---\n\n[规格](../../spec.md) · [现状](../../README.md)\n\n" + _path(run, draft.execution_draft_path).read_text().strip() + "\n"
+    report_dir = _path(run, context.document_path).parent
+    spec_link = os.path.relpath(_path(run, context.work_item.spec.path), report_dir)
+    overview_link = os.path.relpath(_path(run, context.overview_path), report_dir)
+    execution = ("---\n" + yaml.safe_dump(execution_meta, allow_unicode=True, sort_keys=True)
+        + f"---\n\n[规格]({spec_link}) · [现状]({overview_link})\n\n"
+        + _path(run, draft.execution_draft_path).read_text().strip() + "\n")
     overview = _page(meta, _path(run, draft.overview_draft_path).read_text() + _history(context))
     output = DocumentOutput(status="success", summary=draft.summary, spec_path=context.work_item.spec.path,
         document_path=context.document_path, overview_path=context.overview_path,
-        artifacts=[context.document_path, context.overview_path, "specs/README.md"],
+        artifacts=[context.document_path, context.overview_path] + ([] if context.session_only else ["specs/README.md"]),
         documented_files=draft.documented_files, commit_message=draft.commit_message,
         notes_for_next_agent=draft.notes_for_next_agent)
     saved.update(state="prepared", draft=draft.model_dump(),
@@ -446,7 +459,8 @@ def recover(run, execution_id: str) -> DocumentOutput:
     saved["state"] = "published"
     tickets.atomic_json(journal, saved)
     try:
-        rebuild_index(run)
+        if not context.session_only:
+            rebuild_index(run)
         _write(run.context_handoff_dir / "document.md", saved["execution"])
         _write(run.context_handoff_dir / "overview.md", saved["overview_text"])
     except BaseException:
@@ -490,7 +504,7 @@ def prepare_finish(run, document: DocumentOutput, options: FinishOptions | None 
         "overview": overview.model_dump(),
         "spec": tickets.artifact(run.repo_root, document.spec_path).model_dump(),
         "meta": meta, "receipt": receipt.model_dump() if receipt else None,
-        "accepts_scope": options.accepts_scope, "commit": options.commit,
+        "accepts_scope": options.accepts_scope, "commit": options.commit, "session_only": options.session_only,
         "sources": yaml.safe_load(_path(run, document.document_path).read_text().split("---", 2)[1])["sources"]})
 
 
@@ -563,7 +577,8 @@ def sync_finished(run) -> None:
         saved["state"] = "projected"
         tickets.atomic_json(path, saved)
         run.projecting_finish = path
-        rebuild_index(run)
+        if not saved.get("session_only"):
+            rebuild_index(run)
         saved["projection"] = overview.read_text()
         tickets.atomic_json(path, saved)
         if saved["commit"]:
@@ -596,6 +611,16 @@ def mark_unsynced(run, item) -> None:
 def ticket_accepted(run, item, receipt: ArtifactRef) -> None:
     """Project a host-issued ticket receipt without promoting the entire spec."""
     _lock(run)
+    finish = run.session_dir / "spec-finish.json"
+    if finish.exists():
+        saved = json.loads(finish.read_text())
+        if saved.get("state") == "synced" and saved.get("accepted") and saved.get("accepts_scope"):
+            # The owning delivery already published and committed this scope's facts.
+            # Keep the dependency receipt in the session; another docs commit would
+            # immediately invalidate its exact-HEAD baseline.
+            tickets.atomic_json(run.session_dir / "ticket-facts.json", {
+                "state": "synced", "receipt": receipt.model_dump(), "spec": item.spec.model_dump()})
+            return
     initialize(run, item.spec)
     overview = _layout(run, item.spec.path) / "README.md"
     meta, body = _read(overview)

@@ -37,7 +37,7 @@ M0 的版本锁、真实能力验证、脱敏事件样本和未覆盖能力见
 | `templates/harness_engineering/subagents.ts`、`themeMap.ts` | Pi 专属扩展和 TUI，子进程仍调用 `pi` | 删除这两个 Pi 扩展及安装引用，采用 Codex 子代理方案 |
 | `templates/sssf.config.yaml`、`templates/env.sample` | Pi 工具名、混合供应商模型与 Pi 环境变量 | 发布 Codex 配置，删除 Pi 字段、环境变量和示例 |
 | `templates/prompt_engineering/` | 报告合同、角色说明及 Pi 子代理工具名 | 更新运行时相关指令，保留角色和输出结构 |
-| `templates/adws/adw_*.py`、`scripts/make_adw.py` | 每个脚本用 PEP 723 声明依赖 | 统一增加固定版本 SDK 依赖；生成器同步 |
+| `templates/adws/adw-*.py`、`scripts/make_adw.py` | 每个脚本用 PEP 723 声明依赖 | 统一增加固定版本 SDK 依赖；生成器同步 |
 | `templates/adws/adw_modules/tracer.py`、`apps/visualizer/` | SQLite 流水、工具事件、费用及上下文展示 | 统一 Codex 事件与统计口径，删除 Pi 解析和兼容分支 |
 | `README.md`、`SKILL.md`、`cookbooks/`、`references/`、`templates/justfile` | 安装、配置、操作与恢复说明 | 与实际新行为同步 |
 
@@ -168,7 +168,7 @@ Codex 配置提供 `developer_instructions`。有效配置、AGENTS 指令和已
 
 ### 5.2 输出合同
 
-从 `call.output_type.model_json_schema()` 构造本 turn 的输出 schema；输出类型仍由调用点决定，不能仅按角色固定，例如 `adw_prompt` 可以对 scout 使用 `GenericOutput`。
+从 `call.output_type.model_json_schema()` 构造本 turn 的输出 schema；输出类型仍由调用点决定，不能仅按角色固定，例如 `adw-prompt` 可以对 scout 使用 `GenericOutput`。
 
 增加一个小型 schema 转换器：处理嵌套对象、`$defs`、默认字段、required、可空字段和 `additionalProperties`。仅支持已验证的子集；不支持的自定义类型在预检时报错，不能无声丢弃约束。
 
@@ -198,7 +198,7 @@ defaults:
   protected_files:
     - adws/adw_modules/
     - adws/adw_sssf_config/
-    - adws/adw_*.py
+    - adws/adw-*.py
   subagents:
     enabled: false
 

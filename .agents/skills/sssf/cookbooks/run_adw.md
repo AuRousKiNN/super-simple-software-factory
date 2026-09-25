@@ -2,7 +2,7 @@
 
 Read [how_to_prompt_for_the_eng.md](how_to_prompt_for_the_eng.md) first. Launch
 the workflow the engineer named, or select an installed chain by reading each
-`adw_*.py` `Phases:` line. Do not perform a phase's application work yourself.
+`adw-*.py` `Phases:` line. Do not perform a phase's application work yourself.
 
 ## Choose the specification target
 
@@ -11,7 +11,7 @@ Select an unused readable `specs/<spec_key>` and pass `--spec-dir`; for revision
 pass `--spec specs/<spec_key>/spec.md` in a new session. Do not ask the user to name
 routine directories. Missing targets and collisions fail before a planner turn;
 resolve them explicitly rather than retrying with automatically renamed paths.
-This applies to every `adw_plan*` workflow, including `adw_plan_decompose`,
+This applies to every `adw-plan*` workflow, including `adw-plan-decompose`,
 and any other chain containing a planner. Mentioning a directory in the prompt
 is insufficient; pass the CLI argument. Decomposition inherits the spec path and
 writes `specs/<spec_key>/spec.tickets/`. All subsequent work inherits this
@@ -32,13 +32,16 @@ See [execution artifact recovery](../references/spec-artifacts.md).
 ## Launch
 
 ```bash
-uv run adws/adw_simple_sdlc.py "add a health endpoint" --spec-dir specs/health-endpoint
-uv run adws/adw_plan_decompose.py "plan and split the change" --spec-dir specs/example-tickets
-uv run adws/adw_plan_decompose.py "revise the plan and tickets" --spec specs/example-tickets/spec.md
-uv run adws/adw_scout.py requests/investigate.md
-uv run adws/adw_build_test.py "implement the accepted plan" --adw-id a1b2c3d4
-uv run adws/adw_plan.py "plan the change" --spec-dir specs/example --config path/to/roster.yaml
+uv run adws/adw-simple-sdlc.py "add a health endpoint" --spec-dir specs/health-endpoint
+uv run adws/adw-plan-decompose.py "plan and split the change" --spec-dir specs/example-tickets
+uv run adws/adw-plan-decompose.py "revise the plan and tickets" --spec specs/example-tickets/spec.md
+uv run adws/adw-scout.py requests/investigate.md
+uv run adws/adw-build.py --spec specs/example/spec.md
+uv run adws/adw-plan.py "plan the change" --spec-dir specs/example --config path/to/roster.yaml
 ```
+
+Commit existing planning artifacts before starting delivery. Ticket rechecks keep
+HEAD fixed and store their execution documents in the session directory.
 
 An inline prompt and a prompt-file path are equivalent. `--adw-id` joins a
 schema-v2 session when its role mapping remains compatible; it does not perform

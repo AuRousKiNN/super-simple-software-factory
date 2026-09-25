@@ -22,7 +22,7 @@ defaults:
   protected_files:
     - adws/adw_modules/
     - adws/adw_sssf_config/
-    - adws/adw_*.py
+    - adws/adw-*.py
     - adws/spec_artifacts_cli.py
   data_dir: adws/adw_data          # runtime home: {data_dir}/sessions/{adw_id}/{agent_name}/
 

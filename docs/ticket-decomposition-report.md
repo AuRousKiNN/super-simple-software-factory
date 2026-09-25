@@ -5,7 +5,7 @@
 ## 已实现
 
 - decomposer roster、提示词、DecomposeOutput，以及只读 sssf_recon 委派支持。
-- 独立 `adw_decompose --spec` 与 `adw_plan_decompose` 入口；生成器和直接角色入口使用具体输出类型。
+- 独立 `adw-decompose --spec` 与 `adw-plan-decompose` 入口；生成器和直接角色入口使用具体输出类型。
 - planner 返回归档 `spec_path`；builder 支持直接请求、完整 spec、选定 ticket 三种互斥输入。
 - 工件摘要、原子索引、依赖图、前置验收记录与实现基线检查；修复和 review 保留原 work_item。
 - session 绑定、规划 revision 保留、当前输出目录限制，以及输入和 host 绑定文件的只读保护。

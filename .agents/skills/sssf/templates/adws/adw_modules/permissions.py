@@ -40,7 +40,7 @@ def _glob(pattern: str) -> re.Pattern:
     """Translate a pattern, with `*` stopping at a path separator.
 
     fnmatch would let `*` cross `/`, which quietly widens every pattern:
-    `adws/adw_*.py` would match `adws/adw_data/sessions/x/y.py` as well as the
+    `adws/adw-*.py` would match `adws/adw_data/sessions/x/y.py` as well as the
     ADW scripts it means. `**` is the way to say "cross directories".
     """
     out, i = [], 0
@@ -64,7 +64,7 @@ def _glob(pattern: str) -> re.Pattern:
 INDEX_PATH = "@git-index"
 HOST_SESSION_FILES = (
     "spec-binding.json", "spec-artifacts/*.json", "spec-finish.json", "spec-acceptance/*.json", "ticket-facts.json",
-    "work_item.json", "decomposition.json", "decomposition-published.json", "ticket-acceptance.json", "review-routing/*.json",
+    "documentation/**", "delivery-evidence.json", "work_item.json", "decomposition.json", "decomposition-published.json", "ticket-acceptance.json", "review-routing/*.json",
 )
 
 
