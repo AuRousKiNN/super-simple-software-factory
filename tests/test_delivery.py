@@ -108,8 +108,9 @@ def test_manual_blocker_cannot_issue_ticket_acceptance(monkeypatch, repo):
 def test_unconfigured_checks_stop_before_builder(monkeypatch, repo):
     run = setup_flow(monkeypatch, repo, [], adw_build)
     monkeypatch.setattr(quality, 'check_specs', lambda: {})
-    with pytest.raises(ValueError, match='not configured'):
-        adw_build.main('Implement this')
+    assert adw_build.main('Implement this') == 2
+    assert 'preflight_rejected' in run.reason
+    assert 'not configured' in run.reason
     assert run.calls == []
 
 

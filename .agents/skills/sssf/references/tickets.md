@@ -20,7 +20,9 @@ metadata and the runtime binds exact content hashes.
 
 Markdown layout and metadata examples guide the agent; they are not artifact
 validation rules. The runtime does not check headings, body content, AC tables,
-identifier patterns, revision/profile values, extra keys or frontmatter schemas.
+identifier patterns, revision/profile values, extra keys or frontmatter schemas during planning.
+Delivery separately validates the typed execution fields (schema version, identity,
+revision, kind/profile and string-list dependencies/requirements) before any agent.
 There is no decomposer-specific artifact gate or format-repair turn.
 
 `read_set` reads source_spec and tickets metadata for indexing, treats ticket bodies
@@ -58,8 +60,21 @@ in snapshots and restoration on all terminal paths.
 
 ## Evidence and acceptance
 
-`--dependency-evidence` names a JSON array of ArtifactRef objects pointing to
-`<data_dir>/sessions/<adw_id>/ticket-acceptance.json`. Each AcceptanceRecord records
+Normal delivery needs only `--ticket specs/example/spec.tickets/tickets/TICKET-1.md`.
+The host infers `ticket-set.md` from the ticket directory; an explicit `--ticket-set`
+must match. It resolves every direct `blocked_by` dependency without a caller-created
+manifest. `--dependency-evidence` is an optional complete override containing a JSON
+array of ArtifactRef values, subject to exactly the same identity and integrity checks.
+
+For each blocker, select the newest successful acceptance matching its ticket ID
+and current set definition. Order by host acceptance time, then host sequence,
+never file mtime. `ticket-acceptance-order.json` records this chronology and the
+immutable acceptance file hash. Failed later runs do not replace successful evidence.
+Missing current-definition evidence rejects preflight. Corrupt selected evidence
+fails closed: never fall back to an older record. Existing receipts without chronology
+require the explicit upgrade in the installation guide; never silently omit them.
+
+Each AcceptanceRecord records
 schema_version=1, accepted=true, adw_id, ticket_id, definition_sha256, baseline,
 checks, reviews, manual_validation and applicability. Checks/reviews are nonempty
 artifact-reference lists. Each blocker needs exactly one record. Current source
@@ -116,3 +131,31 @@ use a fresh `adw-recheck` session to establish and publish current evidence.
 不进入 builder、质量检查或 reviewer，也不自动补验。builder/reviewer 不重复判断证据新鲜度。
 证据哈希、目标定义和必需检查仍受校验。
 票据重验更新规格 README、执行记录和索引，回写对应票据范围的本次验收结果；成功时仅提交发布的文档，并按最终 HEAD 签发验收。历史失败记录保留。
+
+## Delivery launch and recovery
+
+Code validates target membership, graph/index identity, dependency receipts and proof
+hashes, then applies one clean-baseline policy. Uncommitted tracked changes and
+untracked nonignored engineering inputs (including specs/) are rejected. Only the
+configured host session directory is excluded; this exclusion never grants agents
+write permission. Bound planning files must be tracked and committed even if ignored.
+
+Before scout, code writes `work_item.json` and `delivery-input.json` inside the current
+session. The latter binds HEAD, selected proof and configuration identity. Resume
+reuses that selection; newer receipts cannot silently replace it. Changed bindings
+or baseline require a new session. Host files are protected by permission snapshots.
+
+Scout is read-only and only judges applicability. Code validates its structured
+coverage and permits builder only on applicable verdicts. Stale/uncertain stops the
+run. After scout, code rechecks bound hashes and the implementation baseline. No
+prerequisites means no scout. Checks, independent review, bounded repair loops,
+documentation, commit and host acceptance remain mandatory as before.
+
+Expected launch validation failures produce `preflight-result.json` with
+`status=preflight_rejected`, a logged classification, and exit code 2, before any
+business agent. The terminal acceptance remains false. Correcting caller-owned
+parameters permits a new preflight; do not repeat unchanged failures. This does not
+authorize committing/removing user files, changing configuration, rewriting receipts,
+or skipping evidence. Runtime/auth/permission errors retain their original failure
+classification. Once a business agent starts, the normal stop-on-terminal-failure
+rule applies; configured bounded repair loops remain inside that run.

@@ -5,6 +5,8 @@ planned delivery and evidence-only ticket rechecks. No agent issues acceptance.
 """
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,11 +45,6 @@ def preflight(run) -> list[str]:
     """Reject missing commands and unrelated dirty implementation before agents run."""
     required = quality.required_checks()
     tickets._assert_clean_baseline(run)
-    sessions = run.session_dir.parent.resolve()
-    untracked = [p for p in git_helper.untracked_files()
-                 if not (run.repo_root / p).resolve().is_relative_to(sessions)]
-    if untracked:
-        raise ValueError(f"commit or remove existing untracked inputs before delivery: {untracked}")
     return required
 
 
@@ -67,6 +64,73 @@ def resolve_input(run, target: BuildInput):
     return tickets.spec_work_item(run.repo_root, path)
 
 
+def freeze_input(run, request):
+    """Bind before scout without projecting implementation-in-progress documents."""
+    item = request.work_item
+    tickets.validate_work_item(run, item, check_tree=False)
+    if isinstance(item, TicketWorkItem):
+        tickets._assert_clean_baseline(run)
+        for ref in (item.spec, item.ticket_set, item.ticket, item.index):
+            tracked = tickets._git(run.repo_root, "ls-files", "--", ref.path)
+            if tracked != ref.path:
+                raise tickets.TicketError(f"bound planning input must be committed: {ref.path}")
+    saved = run.session_dir / "delivery-input.json"
+    config = run.cfg.model_dump(mode="json") if hasattr(run.cfg, "model_dump") else {}
+    snapshot = {"schema_version": 1, "baseline": tickets._git(run.repo_root, "rev-parse", "HEAD"),
+                "work_item": item.model_dump(), "config_sha256": tickets._digest(config)}
+    if snapshot["baseline"] != request.build_base:
+        raise tickets.TicketError("delivery baseline changed before input binding")
+    binding = run.session_dir / "work_item.json"
+    if binding.exists() and json.loads(binding.read_text()) != item.model_dump():
+        raise tickets.TicketError("session work_item changed; use a new adw_id")
+    if saved.exists() and json.loads(saved.read_text()) != snapshot:
+        raise tickets.TicketError("immutable delivery input changed; use a new adw_id")
+    tickets.atomic_json(binding, item.model_dump())
+    tickets.atomic_json(saved, snapshot)
+
+
+def verify_frozen_input(run, request):
+    snapshot = json.loads((run.session_dir / "delivery-input.json").read_text())
+    config = run.cfg.model_dump(mode="json") if hasattr(run.cfg, "model_dump") else {}
+    if (snapshot["work_item"] != request.work_item.model_dump()
+            or snapshot["baseline"] != request.build_base
+            or snapshot["config_sha256"] != tickets._digest(config)):
+        raise tickets.TicketError("frozen delivery inputs changed during evidence investigation")
+    tickets.validate_work_item(run, request.work_item, check_tree=False)
+    if tickets._git(run.repo_root, "rev-parse", "HEAD") != request.build_base:
+        raise tickets.TicketError("delivery baseline changed during evidence investigation")
+    if isinstance(request.work_item, TicketWorkItem):
+        tickets._assert_clean_baseline(run)
+
+
+def launch(run, target):
+    """Expected input rejection is distinct from a business/runtime failure."""
+    rejected = None
+    with run.phase(PhaseParams(name="delivery_input", kind="code", owner="delivery",
+                               description="Resolve prerequisites and freeze clean delivery inputs before agents")) as ph:
+        try:
+            required = quality.required_checks()
+            # Ticket resolution and proof checks precede baseline validation.
+            if target.ticket:
+                item = resolve_input(run, target)
+                preflight(run)
+            else:
+                preflight(run)
+                item = resolve_input(run, target)
+            request = DeliveryRequest(target.prompt or "Deliver the bound work item and all its acceptance obligations.",
+                                      item, tickets._git(run.repo_root, "rev-parse", "HEAD"))
+            freeze_input(run, request)
+            ph.log(work_item=item.model_dump(), mandatory_checks=required)
+        except ValueError as error:
+            rejected = {"status": "preflight_rejected", "reason": str(error)}
+            tickets.atomic_json(run.session_dir / "preflight-result.json", rejected)
+            ph.log(**rejected)
+    if rejected:
+        run.finish(accepted=False, reason="preflight_rejected: " + rejected["reason"])
+        return 2
+    return execute(run, request)
+
+
 def capture(run, base, notes):
     changeset = changes.capture(run, ChangeCapture(base=base))
     return changes.as_envelope(changeset, notes)
@@ -74,11 +138,13 @@ def capture(run, base, notes):
 
 def execute(run, request: DeliveryRequest) -> int:
     required = quality.required_checks()
+    freeze_input(run, request)
     spec_artifacts._layout(run, request.work_item.spec.path)
     freshness = evidence_freshness.inspect(run, evidence_freshness.dependency_refs(request.work_item), request.work_item)
     reason = evidence_freshness.failure_reason(freshness)
     if reason:
         return run.finish(accepted=False, reason=reason)
+    verify_frozen_input(run, request)
     prior = request.previous
     if freshness is not None:
         prior = (prior or GenericOutput(status="success")).model_copy(update={

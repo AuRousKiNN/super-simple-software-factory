@@ -127,3 +127,16 @@ or planning acceptance as whole-spec acceptance. An unsynced/freshness warning
 means the visible observation must be reconciled with current evidence.
 
 See [execution artifact recovery](../references/spec-artifacts.md).
+
+## Ticket launch preflight
+
+Launch ticket delivery with `--ticket` alone. The host resolves the set and latest
+successful current-definition prerequisite receipts; do not manually assemble a
+dependency JSON file. See [ticket contract](../references/tickets.md).
+
+`preflight_rejected` (exit 2, no business agent started) is an input rejection, not
+an implementation failure. Correct caller-owned arguments and rerun preflight when
+already authorized. Never retry unchanged inputs or automatically commit, delete,
+ignore user files, change config, or modify acceptance history to pass preflight.
+The stop-and-report rule still applies after business execution starts and to
+runtime, authentication, permission, interruption and unknown-outcome failures.

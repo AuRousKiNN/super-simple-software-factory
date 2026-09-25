@@ -66,7 +66,13 @@ def _metadata(path: Path) -> dict:
     if not lines or lines[0].strip() != "---":
         return {}
     end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), len(lines))
-    return yaml.safe_load("\n".join(lines[1:end])) or {}
+    try:
+        metadata = yaml.safe_load("\n".join(lines[1:end])) or {}
+    except yaml.YAMLError as error:
+        raise TicketError(f"invalid planning metadata: {path}") from error
+    if not isinstance(metadata, dict):
+        raise TicketError(f"planning metadata must be a mapping: {path}")
+    return metadata
 
 
 def _unique(items, label):
@@ -250,20 +256,59 @@ def _assert_clean_baseline(run) -> None:
         raise TicketError("uncommitted tracked changes require dependency revalidation")
     for value in _git(run.repo_root, "ls-files", "--others", "--exclude-standard").splitlines():
         path = run.repo_root / value
-        if path.is_relative_to(sessions) or value.startswith("specs/"):
+        if path.resolve().is_relative_to(sessions.resolve()):
             continue
         raise TicketError(f"untracked implementation input needs dependency revalidation: {value}")
 
 
-def ticket_work_item(run, set_path: str, ticket_path: str, evidence_path: str | None = None) -> TicketWorkItem:
+def _validate_execution_metadata(root: Path, set_path: str) -> None:
+    """Execution needs typed identity fields; Markdown bodies remain opaque."""
+    meta = _metadata(repo_path(root, set_path, ".md"))
+    if (meta.get("schema_version") != 1 or type(meta.get("revision")) is not int
+            or meta["revision"] < 1 or not isinstance(meta.get("source_spec"), str)
+            or not isinstance(meta.get("tickets"), list)
+            or not all(isinstance(p, str) for p in meta["tickets"])):
+        raise TicketError("invalid ticket-set execution metadata")
+    for path in meta["tickets"]:
+        value = _metadata(repo_path(root, path, ".md"))
+        if (value.get("schema_version") != 1 or not isinstance(value.get("id"), str)
+                or not value["id"].strip() or type(value.get("revision")) is not int
+                or value["revision"] < 1 or value.get("kind") not in ("behavior", "refactor", "integration")
+                or value.get("profile") not in ("standard", "critical")
+                or any(not isinstance(value.get(key), list)
+                       or not all(isinstance(v, str) for v in value[key])
+                       for key in ("blocked_by", "requirements"))):
+            raise TicketError(f"invalid ticket execution metadata: {path}")
+
+
+def infer_ticket_set(root: Path, ticket_path: str, explicit: str | None = None) -> str:
+    path = repo_path(root, ticket_path, ".md")
+    inferred = (path.parent.parent / "ticket-set.md").relative_to(root).as_posix()
+    if explicit and explicit != inferred:
+        raise TicketError("explicit ticket set differs from the ticket directory")
+    return explicit or inferred
+
+
+def ticket_work_item(run, set_path: str | None, ticket_path: str, evidence_path: str | None = None) -> TicketWorkItem:
+    from . import acceptance_history
+    set_path = infer_ticket_set(run.repo_root, ticket_path, set_path)
+    _validate_execution_metadata(run.repo_root, set_path)
     payload = load_index(run.repo_root, set_path)
     member = next((t for t in payload["tickets"] if t["artifact"]["path"] == ticket_path), None)
     if member is None:
         raise TicketError("selected ticket is not a member of the bound set")
+    saved = run.session_dir / "work_item.json"
     evidence = []
     if evidence_path:
-        evidence = [ArtifactRef.model_validate(e) for e in json.loads(
-            repo_path(run.repo_root, evidence_path, ".json").read_text())]
+        raw_evidence = json.loads(repo_path(run.repo_root, evidence_path, ".json").read_text())
+        if not isinstance(raw_evidence, list):
+            raise TicketError("dependency evidence override must be a JSON array")
+        evidence = [ArtifactRef.model_validate(e) for e in raw_evidence]
+    elif saved.exists():
+        previous = TicketWorkItem.model_validate_json(saved.read_text())
+        evidence = previous.dependency_evidence
+    else:
+        evidence = acceptance_history.latest(run, payload, member["blocked_by"])
     item = TicketWorkItem(spec=payload["spec"], ticket_set=payload["ticket_set"],
                           ticket=member["artifact"], ticket_id=member["id"],
                           index=artifact(run.repo_root, str(Path(set_path).parent / "index.json"), ".json"),
@@ -322,15 +367,14 @@ def bind_work_item(run, call, role: str = "builder"):
 
 def record_acceptance(run, record: AcceptanceRecord) -> ArtifactRef:
     item = TicketWorkItem.model_validate_json((run.session_dir / "work_item.json").read_text())
-    if not (item.spec.path.startswith("specs/") and item.spec.path.endswith("/spec.md")):
-        return _record_acceptance(run, record)
     from . import permissions, spec_artifacts
     previous = getattr(run, "workspace_lock", None)
     lock = permissions.acquire_workspace_lock(run.repo_root)
     run.workspace_lock = lock
     try:
         receipt = _record_acceptance(run, record)
-        spec_artifacts.ticket_accepted(run, item, receipt)
+        if item.spec.path.startswith("specs/") and item.spec.path.endswith("/spec.md"):
+            spec_artifacts.ticket_accepted(run, item, receipt)
         return receipt
     finally:
         lock.release()
@@ -359,7 +403,10 @@ def _record_acceptance(run, record: AcceptanceRecord) -> ArtifactRef:
     if path.exists() and AcceptanceRecord.model_validate_json(path.read_text()) != record:
         raise TicketError("immutable ticket acceptance already exists; revalidate in a fresh session")
     atomic_json(path, record.model_dump())
-    return artifact(run.repo_root, path.resolve().relative_to(run.repo_root.resolve()).as_posix(), ".json")
+    receipt = artifact(run.repo_root, path.resolve().relative_to(run.repo_root.resolve()).as_posix(), ".json")
+    from . import acceptance_history
+    acceptance_history.publish(run, record, receipt)
+    return receipt
 
 
 def select_ticket(run, output: DecomposeOutput, selection) -> TicketWorkItem:

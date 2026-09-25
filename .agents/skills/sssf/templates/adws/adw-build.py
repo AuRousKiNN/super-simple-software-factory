@@ -7,7 +7,7 @@
 Usage:
     uv run adws/adw-build.py "Implement the requested change"
     uv run adws/adw-build.py --spec specs/example/spec.md
-    uv run adws/adw-build.py --ticket specs/example/spec.tickets/tickets/TICKET-1.md --ticket-set specs/example/spec.tickets/ticket-set.md --dependency-evidence evidence.json
+    uv run adws/adw-build.py --ticket specs/example/spec.tickets/tickets/TICKET-1.md
 
 Phases: code(preflight/input) -> [scout(evidence freshness)] -> builder -> code(checks) -> reviewer -> code(route)
         -> [builder(repair) -> code(checks) -> reviewer] bounded
@@ -16,7 +16,7 @@ Phases: code(preflight/input) -> [scout(evidence freshness)] -> builder -> code(
 import argparse
 import sys
 
-from adw_modules import agents, delivery, git_helper, session, utils
+from adw_modules import agents, delivery, session, utils
 from adw_modules.data_types import BuildInput, PhaseParams
 
 REQUIRED_AGENTS = delivery.REQUIRED_AGENTS
@@ -30,13 +30,7 @@ def main(prompt: str | BuildInput, config: str = "adws/adw_sssf_config/sssf.conf
     with run.phase(PhaseParams(name="request", kind="engineer", owner=run.engineer,
                                description="Record the selected delivery target and request")) as ph:
         ph.log(input=target.model_dump())
-    with run.phase(PhaseParams(name="delivery_input", kind="code", owner="delivery",
-                               description="Reject missing checks and bind the immutable target before implementation")) as ph:
-        required = delivery.preflight(run)
-        item = delivery.resolve_input(run, target)
-        ph.log(work_item=item.model_dump(), mandatory_checks=required)
-    return delivery.execute(run, delivery.DeliveryRequest(
-        target.prompt or "Deliver the bound work item and all its acceptance obligations.", item, git_helper.rev("HEAD")))
+    return delivery.launch(run, target)
 
 
 if __name__ == "__main__":

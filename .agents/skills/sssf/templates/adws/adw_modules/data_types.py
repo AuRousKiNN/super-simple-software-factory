@@ -736,8 +736,8 @@ class BuildInput(BaseModel):
     def exclusive_mode(self):
         if sum(bool(v) for v in (self.prompt, self.spec, self.ticket)) != 1:
             raise ValueError("provide exactly one of prompt, --spec or --ticket")
-        if bool(self.ticket) != bool(self.ticket_set):
-            raise ValueError("--ticket and --ticket-set must be supplied together")
+        if self.ticket_set and not self.ticket:
+            raise ValueError("--ticket-set requires --ticket")
         if self.dependency_evidence and not self.ticket:
             raise ValueError("--dependency-evidence requires --ticket")
         return self

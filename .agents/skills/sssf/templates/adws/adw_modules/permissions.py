@@ -64,7 +64,7 @@ def _glob(pattern: str) -> re.Pattern:
 INDEX_PATH = "@git-index"
 HOST_SESSION_FILES = (
     "spec-binding.json", "spec-artifacts/*.json", "spec-finish.json", "spec-acceptance/*.json", "ticket-facts.json",
-    "documentation/**", "delivery-evidence.json", "work_item.json", "decomposition.json", "decomposition-published.json", "ticket-acceptance.json", "review-routing/*.json",
+    "documentation/**", "delivery-evidence.json", "delivery-input.json", "preflight-result.json", "ticket-acceptance-order.json", "work_item.json", "decomposition.json", "decomposition-published.json", "ticket-acceptance.json", "review-routing/*.json",
 )
 
 

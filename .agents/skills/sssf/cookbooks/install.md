@@ -136,3 +136,25 @@ Merge `quality.required_checks()` and `quality.not_applicable_checks()` alongsid
 the project's real command registry: quality.py is preserved on upgrade. Update
 reviewer prompts so ticket required-verification evidence names actual files.
 No generic distribution can infer the target repository's correct test command.
+
+## Upgrading automatic ticket delivery
+
+Merge the preserved `adw-build.py` entry to call `delivery.launch(run, target)`.
+`--ticket-set` becomes optional; normal callers supply only `--ticket`. Generated
+builder chains use the shared delivery module and retain its frozen-input guard.
+Keep configured quality commands unchanged. No observability schema change is needed.
+
+Stop workflows before upgrading. Historical acceptance files remain immutable.
+For existing schema-v2 records, explicitly add chronological sidecars from successful
+host session completion timestamps and stable database row order:
+
+```bash
+uv run --with pydantic --with pyyaml --with python-dotenv --with rich \
+  .agents/skills/sssf/scripts/migrate_ticket_history.py
+```
+
+The migration is idempotent, acquires the workspace lock, validates all source
+records and referenced proof before writing, and never changes original receipt
+bytes. Missing successful trace timestamps fail explicitly; do not use mtimes or
+invent acceptance times. Old records can still be explicitly supplied with
+`--dependency-evidence`, subject to normal validation and scout applicability.

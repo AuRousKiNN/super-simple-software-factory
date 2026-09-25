@@ -29,7 +29,7 @@ from typing import Literal
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 SSSF_SKILL = Path(__file__).resolve().parent.parent / "SKILL.md"
-DISTRIBUTION_VERSION = "spec-artifacts-v1-codex-sdk-0.155.1"
+DISTRIBUTION_VERSION = "ticket-launch-v1-codex-sdk-0.155.1"
 MANIFEST_PATH = Path(".sssf/manifest.json")
 BACKUP_ROOT = Path(".sssf/backups")
 
@@ -552,6 +552,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  rollback snapshot: {snapshot_id}")
     print("\nspec artifact upgrade: merge --spec-dir/--spec targets, DocumentDraftOutput and host publication.")
     print("  Documenter writes only invocation reports; remove standalone document workflows.")
+    print("\nautomatic ticket upgrade: merge adw-build to delivery.launch; --ticket alone resolves dependencies.")
+    print("  Explicitly run scripts/migrate_ticket_history.py for existing acceptance chronology.")
     print("\nticket contract upgrade: preserved roster/prompts/ADWs need an explicit merge.")
     print("  Add decomposer + recon; planner spec_path; builder/reviewer {{work_item}};")
     print("  concrete output types and unchanged work_item in repair/review calls.")
