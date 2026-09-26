@@ -213,18 +213,25 @@ class Run:
                 phase_id=self.phases[-1].phase_id if self.phases else "",
                 type="error", name="not_accepted", payload={"reason": note}))
             self.console.note(f"not accepted: {note}")
+        from . import spec_artifacts
         try:
-            self.tracer.session_finish(self.adw_id, ok=ok)
-            from . import spec_artifacts
-            spec_artifacts.record_finish(self, ok)
-        finally:
-            self.close()
-        try:
+            try:
+                spec_artifacts.record_finish(self, ok)
+            finally:
+                self.close()
             spec_artifacts.sync_finished(self)
-        except Exception as error:
-            self.reason = f"document synchronization failed: {error}"
-            self.console.note(f"运行结果已保存，但文档同步失败：{error}")
+            finalize = getattr(self, "delivery_finalize", None)
+            if ok and finalize:
+                finalize()
+        except BaseException as error:
+            self.accepted = False
+            self.reason = f"delivery finalization failed: {error}"
+            self.tracer.session_finish(self.adw_id, ok=False)
+            if not isinstance(error, Exception):
+                raise
+            self.console.note(f"收尾未完成，请检查失败记录：{error}")
             return 1
+        self.tracer.session_finish(self.adw_id, ok=ok)
         self.console.session_finished(ok, self.tokens, self.cost,
                                       self.cfg.observability.db)
         return 0 if ok else 1

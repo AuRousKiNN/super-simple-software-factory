@@ -206,8 +206,15 @@ class Flow:
         self.accepted = accepted
         self.reason = reason
         self.closed = True
-        spec_artifacts.record_finish(self, accepted)
-        spec_artifacts.sync_finished(self)
+        try:
+            spec_artifacts.record_finish(self, accepted)
+            spec_artifacts.sync_finished(self)
+            if accepted and getattr(self, "delivery_finalize", None):
+                self.delivery_finalize()
+        except Exception as error:
+            self.accepted = False
+            self.reason = f"delivery finalization failed: {error}"
+            return 1
         return 0 if accepted else 1
 
 

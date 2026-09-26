@@ -425,11 +425,22 @@ def _record_acceptance(run, record: AcceptanceRecord) -> ArtifactRef:
     path = run.session_dir / "ticket-acceptance.json"
     if path.exists() and AcceptanceRecord.model_validate_json(path.read_text()) != record:
         raise TicketError("immutable ticket acceptance already exists; revalidate in a fresh session")
-    atomic_json(path, record.model_dump())
-    receipt = artifact(run.repo_root, path.resolve().relative_to(run.repo_root.resolve()).as_posix(), ".json")
-    from . import acceptance_history
-    acceptance_history.publish(run, record, receipt)
-    return receipt
+    order = run.session_dir / "ticket-acceptance-order.json"
+    existed = {target: target.exists() for target in (path, order)}
+    try:
+        if not existed[path]:
+            atomic_json(path, record.model_dump())
+        receipt = artifact(run.repo_root, path.resolve().relative_to(run.repo_root.resolve()).as_posix(), ".json")
+        from . import acceptance_history
+        acceptance_history.publish(run, record, receipt)
+        return receipt
+    except BaseException:
+        # Roll back only newly published files while still holding the workspace lock.
+        # A caught failure must not leave an unindexed receipt poisoning future tickets.
+        for target in (order, path):
+            if not existed[target]:
+                target.unlink(missing_ok=True)
+        raise
 
 
 def select_ticket(run, output: DecomposeOutput, selection) -> TicketWorkItem:

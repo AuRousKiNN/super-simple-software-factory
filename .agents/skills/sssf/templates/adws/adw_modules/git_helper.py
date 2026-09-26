@@ -124,3 +124,20 @@ def commit_paths(message: str, paths: list[str]) -> str:
     _git("add", "-A", "--", *changed)
     _git("commit", "--only", "-m", message, "--", *changed)
     return rev("HEAD")
+
+
+def planned_tree(paths: list[str]) -> str:
+    """Compute the exact commit tree using an isolated index, leaving staging intact."""
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="sssf-commit-") as directory:
+        env = dict(os.environ, GIT_INDEX_FILE=str(Path(directory) / "index"))
+        def command(*args):
+            result = subprocess.run(["git", *args], env=env, capture_output=True, text=True)
+            if result.returncode:
+                raise RuntimeError(result.stderr.strip())
+            return result.stdout.strip()
+        command("read-tree", "HEAD")
+        if paths:
+            command("add", "-A", "--", *paths)
+        return command("write-tree")

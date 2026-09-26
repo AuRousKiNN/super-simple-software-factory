@@ -479,10 +479,27 @@ def document(run, request: DocumentRequest, name: str = "document") -> DocumentO
         ph.log(execution_id=context.execution_id if context else None)
     if context is None:
         return None
-    with run.phase(PhaseParams(name=name, kind="agent", owner="documenter", retries=1,
-                               description="Explain current evidence and preserve cumulative specification progress")) as ph:
-        draft = ph.call(AgentCall(output_type=DocumentDraftOutput, prompt=request.purpose,
-                                  work_item=request.work_item, document_context=context))
+    from . import recovery
+    state = getattr(run, "active_delivery_checkpoint", None)
+    if state and state.document_draft:
+        with run.phase(PhaseParams(name=name + "_restore", kind="code", owner="recovery",
+                                   description="Reuse validated document drafts with fresh host publication metadata")) as ph:
+            for ref in state.draft_proofs:
+                tickets.verify_ref(run.repo_root, ref)
+            prior = state.document_draft
+            for source, target in [(prior.execution_draft_path, context.execution_draft_path),
+                                   (prior.overview_draft_path, context.overview_draft_path)]:
+                _write(_path(run, target), _path(run, source).read_text())
+            draft = prior.model_copy(update={"execution_draft_path": context.execution_draft_path,
+                "overview_draft_path": context.overview_draft_path,
+                "artifacts": [context.execution_draft_path, context.overview_draft_path]})
+            ph.log(source=state.source)
+    else:
+        with run.phase(PhaseParams(name=name, kind="agent", owner="documenter", retries=1,
+                                   description="Explain current evidence and preserve cumulative specification progress")) as ph:
+            draft = ph.call(AgentCall(output_type=DocumentDraftOutput, prompt=request.purpose,
+                                      work_item=request.work_item, document_context=context))
+    recovery.remember_draft(run, draft)
     with run.phase(PhaseParams(name=name + "_publish", kind="code", owner="spec_artifacts",
                                description="Publish immutable history and refresh the cumulative overview")) as ph:
         output = publish(run, context, draft)

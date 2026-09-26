@@ -70,8 +70,9 @@ def test_completed_builder_is_reused_only_for_resume(monkeypatch, repo, owner, m
     assert adw_build.main(BuildInput(**{mode: source.adw_id})) == 0
     owners = [p.owner for p, _ in run.calls]
     assert ("builder" in owners) == (mode == "retry")
-    assert owners[-2:] == ["reviewer", "documenter"]
-    assert any(p.params.name == "checks_1" for p in run.phases)
+    assert owners[-1] == "documenter"
+    assert ("reviewer" in owners) == (mode == "retry" or owner == "reviewer")
+    assert any(p.params.name == "checks_1" for p in run.phases) == (mode == "retry")
     assert retained(source) == before
 
 
@@ -173,7 +174,7 @@ def test_no_implicit_replay_of_live_successful_or_legacy_runs(monkeypatch, repo,
 
 def test_recovery_target_is_exclusive():
     for values in ({"resume": "a", "retry": "b"}, {"resume": "a", "ticket": "ticket.md"},
-                   {"retry": "a", "prompt": "changed goal"}, {"resume": "a", "ticket_set": "set.md"}):
+                   {"retry": "a", "spec": "spec.md", "prompt": "extra"}, {"resume": "a", "ticket_set": "set.md"}):
         with pytest.raises(ValueError):
             BuildInput(**values)
 

@@ -736,8 +736,9 @@ class BuildInput(BaseModel):
 
     @model_validator(mode="after")
     def exclusive_mode(self):
-        if sum(bool(v) for v in (self.prompt, self.spec, self.ticket, self.resume, self.retry)) != 1:
-            raise ValueError("provide exactly one of prompt, --spec, --ticket, --resume or --retry")
+        modes = sum(bool(v) for v in (self.spec, self.ticket, self.resume, self.retry))
+        if modes > 1 or (modes == 0 and not self.prompt):
+            raise ValueError("choose at most one of --spec, --ticket, --resume or --retry; provide prompt when no target is selected")
         if self.ticket_set and not self.ticket:
             raise ValueError("--ticket-set requires --ticket")
         if self.dependency_evidence and not self.ticket:

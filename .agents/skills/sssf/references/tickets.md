@@ -155,3 +155,8 @@ authorize committing/removing user files, changing configuration, rewriting rece
 or skipping evidence. Runtime/auth/permission errors retain their original failure
 classification. Once a business agent starts, the normal stop-on-terminal-failure
 rule applies; configured bounded repair loops remain inside that run.
+
+An optional positional prompt may accompany `--ticket` or `--spec` to supply extra
+instructions. The bound artifact remains the delivery target; builder, repairs,
+reviewer and documenter receive the instructions. The request is frozen within
+the attempt and retained for recovery.

@@ -287,7 +287,7 @@ def test_envelopes_and_input_modes():
     assert strict_output_schema(DecomposeOutput)["additionalProperties"] is False
     with pytest.raises(ValueError, match="success requires ready"):
         DecomposeOutput(status="success", outcome="needs_decision")
-    for params in ({}, {"prompt": "x", "spec": "y"}, {"ticket_set": "x"}, {"spec": "x", "dependency_evidence": "y"}):
+    for params in ({}, {"spec": "x", "ticket": "y", "prompt": "extra"}, {"ticket_set": "x"}, {"spec": "x", "dependency_evidence": "y"}):
         with pytest.raises(ValueError):
             BuildInput(**params)
     assert BuildInput(ticket="ticket.md").ticket

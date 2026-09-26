@@ -8,6 +8,8 @@ Usage:
     uv run adws/adw-build.py "Implement the requested change"
     uv run adws/adw-build.py --spec specs/example/spec.md
     uv run adws/adw-build.py --ticket specs/example/spec.tickets/tickets/TICKET-1.md
+    uv run adws/adw-build.py "Preserve the public API" --spec specs/example/spec.md
+    uv run adws/adw-build.py "Add Chinese documentation" --ticket specs/example/spec.tickets/tickets/TICKET-1.md
     uv run adws/adw-build.py --resume <failed-or-interrupted-adw-id>
     uv run adws/adw-build.py --retry <failed-or-interrupted-adw-id>
 
@@ -37,7 +39,8 @@ def main(prompt: str | BuildInput, config: str = "adws/adw_sssf_config/sssf.conf
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("prompt", nargs="?", default="")
+    parser.add_argument("prompt", nargs="?", default="",
+                        help="request or supplemental instructions; usable with every target, appended on recovery")
     parser.add_argument("--spec")
     parser.add_argument("--ticket")
     parser.add_argument("--ticket-set")

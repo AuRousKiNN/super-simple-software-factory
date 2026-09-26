@@ -79,7 +79,7 @@ def freeze_input(run, request):
     saved = run.session_dir / "delivery-input.json"
     config = run.cfg.model_dump(mode="json") if hasattr(run.cfg, "model_dump") else {}
     snapshot = {"schema_version": 1, "baseline": request.build_base if restored else tickets._git(run.repo_root, "rev-parse", "HEAD"),
-                "work_item": item.model_dump(), "config_sha256": tickets._digest(config)}
+                "prompt": request.prompt, "work_item": item.model_dump(), "config_sha256": tickets._digest(config)}
     if snapshot["baseline"] != request.build_base:
         raise tickets.TicketError("delivery baseline changed before input binding")
     binding = run.session_dir / "work_item.json"
@@ -94,7 +94,8 @@ def freeze_input(run, request):
 def verify_frozen_input(run, request):
     snapshot = json.loads((run.session_dir / "delivery-input.json").read_text())
     config = run.cfg.model_dump(mode="json") if hasattr(run.cfg, "model_dump") else {}
-    if (snapshot["work_item"] != request.work_item.model_dump()
+    if (snapshot["prompt"] != request.prompt
+            or snapshot["work_item"] != request.work_item.model_dump()
             or snapshot["baseline"] != request.build_base
             or snapshot["config_sha256"] != tickets._digest(config)):
         raise tickets.TicketError("frozen delivery inputs changed before build")
@@ -148,6 +149,11 @@ def recover(run, target: BuildInput) -> int:
         try:
             state = recovery.load(run, target.resume or target.retry, "resume" if target.resume else "retry")
             quality.required_checks()
+            if target.prompt:
+                state.prompt += "\n\nAdditional instructions for this recovery attempt:\n" + target.prompt
+                # New instructions may affect implementation, so builder must reassess it.
+                state.build = None
+                recovery.invalidate(state, checks=True)
             ph.log(source=state.source, mode=state.mode, build_completed=state.build is not None)
         except ValueError as error:
             rejected = {"status": "preflight_rejected", "reason": str(error)}
@@ -197,10 +203,20 @@ def execute(run, request: DeliveryRequest) -> int:
 
 def _execute(run, request: DeliveryRequest, state: recovery.DeliveryCheckpoint) -> int:
     required = sorted(set(quality.required_checks()) | set(state.required_checks))
+    results = recovery.reusable_checks(run, state) if state.build else {}
+    cached = recovery.reusable_approval(run, state) if state.build else None
+    if cached and all(name in results for name in required):
+        with run.phase(PhaseParams(name="restore_review", kind="code", owner="recovery",
+                                   description="Validate retained checks and approval before continuing unfinished finalization")) as ph:
+            ph.log(source=state.source, receipt=state.approval.model_dump(), checks=sorted(results))
+        return complete(run, DeliveryEvidence(request, cached.review, run.repo_root / state.approval.path,
+            results, required, cached.decision, state.build.commit_message or "记录验证后的实现"))
     tickets.bind_work_item(run, AgentCall(output_type=BuildOutput, prompt=request.prompt,
                                          work_item=request.work_item), "builder")
     build = state.build
     if build is None:
+        recovery.invalidate(state, checks=True)
+        results = {}
         recovery.save(run, state)
         prompt = request.prompt
         if state.source:
@@ -214,20 +230,26 @@ def _execute(run, request: DeliveryRequest, state: recovery.DeliveryCheckpoint) 
         recovery.save(run, state)
     else:
         with run.phase(PhaseParams(name="restore_build", kind="code", owner="delivery",
-                                   description="Reuse completed implementation while requiring fresh verification and review")) as ph:
+                                   description="Reuse completed implementation and validate retained verification before continuing")) as ph:
             ph.log(source=state.source, summary=build.summary)
     repairs, verifications, round_number = state.repairs, state.verifications, 0
     previous_review = state.previous_review
-    results = {}
-    pending = required
+    pending = [name for name in required if name not in results]
+    if results:
+        with run.phase(PhaseParams(name="restore_checks", kind="code", owner="recovery",
+                                   description="Reuse matching successful checks and execute only missing or invalid checks")) as ph:
+            ph.log(checks=sorted(results))
     while True:
         round_number += 1
         if pending:
             with run.phase(PhaseParams(name=f"checks_{round_number}", kind="code", owner="quality",
                                        description="Execute every required or invalidated check against the current implementation")) as ph:
-                result = quality.run_selected(run, pending)
-                results.update({c.name: c for c in result.checks})
-                ph.log(passed=result.passed, artifacts=result.artifacts)
+                for name in pending:
+                    result = quality.run_selected(run, [name])
+                    results.update({c.name: c for c in result.checks})
+                    for check in result.checks:
+                        recovery.remember_check(run, state, check)
+                    ph.log(passed=result.passed, artifacts=result.artifacts)
         with run.phase(PhaseParams(name=f"changes_review_{round_number}", kind="code", owner="git",
                                    description="Capture actual changes and execution evidence for independent review")) as ph:
             results = review_routing.refresh_results(run, results)
@@ -256,6 +278,8 @@ def _execute(run, request: DeliveryRequest, state: recovery.DeliveryCheckpoint) 
             receipt = review_routing.save(run, review, decision, review_routing.ReceiptContext(
                 request.prompt, request.build_base, request.work_item, sorted(set(required) | set(results))))
             ph.log(receipt=str(receipt), **decision.model_dump())
+        if decision.action == "approve":
+            recovery.remember_approval(run, state, receipt)
         if decision.action in {"approve", "handoff"}:
             return complete(run, DeliveryEvidence(request, review, receipt, results, required, decision,
                 build.commit_message or "实现需求并记录验证结果"))
@@ -264,6 +288,7 @@ def _execute(run, request: DeliveryRequest, state: recovery.DeliveryCheckpoint) 
             state.repairs = repairs
             # A partial repair invalidates the previous successful builder output.
             state.build = None
+            recovery.invalidate(state, checks=True)
             state.required_checks = sorted(set(state.required_checks) | set(decision.checks))
             recovery.save(run, state)
             with run.phase(PhaseParams(name=f"revise_{repairs}", kind="agent", owner="builder", retries=1,
@@ -312,11 +337,19 @@ def complete(run, evidence: DeliveryEvidence) -> int:
                 raise ValueError(f"required validation has no evidence: {obligation.id}")
             manual.extend(tickets.verification_artifact(run.repo_root, value) for value in obligation.evidence)
         manual.extend(evidence.extra_evidence)
-    document = spec_artifacts.document(run, DocumentRequest(work_item=item,
-        purpose="记录实施、质量检查、独立审查及未关闭义务。" + evidence.decision.reason,
-        changes=capture(run, evidence.request.build_base, evidence.decision.reason),
-        checks=list(evidence.results.values()), review=evidence.review, review_receipt=receipt_ref,
-        evidence=list(evidence.extra_evidence)))
+    state = getattr(run, "active_delivery_checkpoint", None)
+    document = recovery.reusable_document(run, state) if state else None
+    if document is None:
+        document = spec_artifacts.document(run, DocumentRequest(work_item=item,
+            purpose="记录实施、质量检查、独立审查及未关闭义务。" + evidence.decision.reason
+                    + "\nDelivery instructions:\n" + evidence.request.prompt,
+            changes=capture(run, evidence.request.build_base, evidence.decision.reason),
+            checks=list(evidence.results.values()), review=evidence.review, review_receipt=receipt_ref,
+            evidence=list(evidence.extra_evidence)))
+        if state and document:
+            state.document = document
+            state.document_proof = recovery.file_ref(run, document.document_path)
+            recovery.save(run, state)
     if document is None:
         raise ValueError("delivery documentation requires specs/<key>/spec.md; migrate the target layout")
     if approved:
@@ -329,10 +362,22 @@ def complete(run, evidence: DeliveryEvidence) -> int:
                 paths = [p for p in paths if p in document.artifacts]
             sessions = run.session_dir.parent.resolve()
             paths = [p for p in paths if not (run.repo_root / p).resolve().is_relative_to(sessions)]
-            ph.log(sha=git_helper.commit_paths(evidence.commit_message + "\n\n" +
-                (document.commit_message or "补充执行证据与交付现状"), paths))
+            message = evidence.commit_message + "\n\n" + (document.commit_message or "补充执行证据与交付现状")
+            ph.log(sha=recovery.commit_once(run, state, message, paths) if state
+                   else git_helper.commit_paths(message, paths))
             _assert_unchanged(run, receipt.tree_sha256)
-            tickets._assert_clean_baseline(run)
+            if state and state.source and state.finish_started and state.commit_sha:
+                # A stopped finish may have written its two host-owned projections
+                # before their commit. The new finish will settle those exact paths.
+                dirty = set(git_helper.diff_files("HEAD") + git_helper.untracked_files())
+                dirty = {p for p in dirty if not (run.repo_root / p).resolve().is_relative_to(sessions)}
+                if dirty - {document.overview_path, "specs/README.md"}:
+                    tickets._assert_clean_baseline(run)
+            else:
+                tickets._assert_clean_baseline(run)
+    if state:
+        state.finish_started = True
+        recovery.save(run, state)
     spec_artifacts.prepare_finish(run, document, FinishOptions(receipt=receipt_ref,
         accepts_scope=True, commit=approved))
     publication = None
@@ -347,19 +392,16 @@ def complete(run, evidence: DeliveryEvidence) -> int:
         publication = dict(checks=checks, reviews=[receipt_ref], manual_validation=manual,
             applicability="Checks and independent review cover this ticket and the unchanged implementation tree "
                           + receipt.tree_sha256 + "; required validation evidence was reviewed for applicability.")
-    result = run.finish(accepted=approved, reason=evidence.decision.reason)
-    if result or not approved:
-        return result
-    # finish may commit only host-owned documentation; inspect the final HEAD again.
-    try:
+    def finalize():
+        # Run.finish invokes this only after document projection, before reporting success.
         _assert_unchanged(run, receipt.tree_sha256)
         tickets._assert_clean_baseline(run)
         if publication:
             record = AcceptanceRecord(adw_id=run.adw_id, ticket_id=item.ticket_id,
                 definition_sha256=item.definition_sha256, baseline=git_helper.rev("HEAD"), **publication)
             tickets.record_acceptance(run, record)
-    except Exception as error:
-        run.reason = f"delivery acceptance publication failed: {error}"
-        run.console.note(f"交付验收签发失败，需使用 adw-recheck 重新验证：{error}")
-        return 1
-    return 0
+    run.delivery_finalize = finalize if approved else None
+    try:
+        return run.finish(accepted=approved, reason=evidence.decision.reason)
+    finally:
+        run.delivery_finalize = None

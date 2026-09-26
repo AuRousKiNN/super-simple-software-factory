@@ -169,7 +169,7 @@ See [recovery semantics and limits](../references/delivery-recovery.md).
 ## Upgrading automatic ticket delivery
 
 Merge the preserved `adw-build.py` entry to call `delivery.launch(run, target)`.
-`--ticket-set` becomes optional; normal callers supply only `--ticket`. Generated
+`--ticket-set` becomes optional; normal callers supply `--ticket` and an optional prompt. Generated
 builder chains use the shared delivery module and retain its frozen-input guard.
 Keep configured quality commands unchanged. No observability schema change is needed.
 
@@ -200,3 +200,23 @@ before routing or publication. Dependency documentation remains reading referenc
 retain the inspection and its applicability in the current review report instead
 of issuing acceptance against a symlink or `node_modules` file. Historical session
 artifacts stay immutable; any explicitly requested recovery starts a new session.
+
+## Upgrading supplemental delivery instructions
+
+Update managed `data_types.py` and `delivery.py`. Prompt is available with spec,
+ticket, resume and retry modes; only the target selectors are mutually exclusive.
+Merge the updated usage/help into preserved `adw-build.py`. Existing positional
+prompt parsing already supports these combinations. New attempts freeze and
+retain the effective prompt, including appended recovery instructions.
+
+
+## Upgrading stage recovery
+
+Update managed `recovery.py`, `delivery.py`, `git_helper.py`, `spec_artifacts.py`,
+`tickets.py` and `runner.py` together. Existing `--resume` now retains matching successful
+checks, approval, document drafts/publication and delivery commit intent. No new
+CLI option or trace schema migration is needed; `--retry` still reruns builder
+and downstream stages. The preserved project `quality.py` API is unchanged:
+the shared delivery runner checkpoints one configured check at a time.
+New fields extend checkpoint schema 1; absent evidence cannot be reused. Run
+finish now reports success only after the delivery finalizer publishes acceptance.

@@ -1,7 +1,7 @@
 """Explicit delivery recovery in a new session, preserving the source attempt.
 
-Checkpoints retain implementation progress, never approval. Every recovery runs
-fresh checks and review; only a successful builder step can be skipped.
+Checkpoints retain completed stages and their proof. Resume reuses only results
+whose inputs and retained artifacts still match; retry invalidates downstream work.
 """
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import permissions, quality, review_routing, tickets
-from .data_types import ArtifactRef, BuildOutput, ReviewOutput, SpecWorkItem, TicketWorkItem
+from .data_types import (ArtifactRef, BuildOutput, DocumentDraftOutput, DocumentOutput,
+                         QualityCheckResult, ReviewOutput, ReviewReceipt, SpecWorkItem, TicketWorkItem)
 
 
 class DeliveryCheckpoint(BaseModel):
@@ -31,6 +32,18 @@ class DeliveryCheckpoint(BaseModel):
     workspace: dict = Field(default_factory=dict)
     build: BuildOutput | None = None
     previous_review: ReviewOutput | None = None
+    checks: dict[str, QualityCheckResult] = Field(default_factory=dict)
+    check_proofs: dict[str, ArtifactRef] = Field(default_factory=dict)
+    approval: ArtifactRef | None = None
+    approval_proofs: list[ArtifactRef] = Field(default_factory=list)
+    document_draft: DocumentDraftOutput | None = None
+    draft_proofs: list[ArtifactRef] = Field(default_factory=list)
+    document: DocumentOutput | None = None
+    document_proof: ArtifactRef | None = None
+    commit_parent: str = ""
+    commit_tree: str = ""
+    commit_sha: str = ""
+    finish_started: bool = False
     repairs: int = Field(default=0, ge=0)
     verifications: int = Field(default=0, ge=0)
     required_checks: list[str] = Field(default_factory=list)
@@ -170,5 +183,130 @@ def load(run, source: str, mode: Literal["resume", "retry"]) -> DeliveryCheckpoi
     result.failure_phase = result.failure_owner = ""
     if mode == "retry":
         result.build = None
+        invalidate(result, checks=True)
         result.repairs = result.verifications = 0
     return result
+
+
+def invalidate(state: DeliveryCheckpoint, *, checks: bool = False) -> None:
+    """Invalidate descendants without discarding previous review obligations."""
+    if checks:
+        state.checks = {}
+        state.check_proofs = {}
+    state.approval = None
+    state.approval_proofs = []
+    state.document_draft = None
+    state.draft_proofs = []
+    state.document = None
+    state.document_proof = None
+    state.commit_parent = state.commit_tree = state.commit_sha = ""
+    state.finish_started = False
+
+
+def file_ref(run, value) -> ArtifactRef:
+    path = Path(value)
+    relative = path.relative_to(run.repo_root).as_posix() if path.is_absolute() else str(value)
+    return tickets.artifact(run.repo_root, relative, path.suffix)
+
+
+def remember_check(run, state, result) -> None:
+    state.checks[result.name] = result
+    state.check_proofs[result.name] = file_ref(run, result.output_artifact)
+    save(run, state)
+
+
+def reusable_checks(run, state) -> dict[str, QualityCheckResult]:
+    valid = {}
+    for name, result in review_routing.refresh_results(run, state.checks).items():
+        try:
+            ref = state.check_proofs[name]
+            if ref.path != file_ref(run, result.output_artifact).path:
+                continue
+            tickets.verify_ref(run.repo_root, ref)
+        except (KeyError, ValueError, OSError):
+            continue
+        if result.passed and result.applicable:
+            valid[name] = result
+    if set(valid) != set(state.checks):
+        invalidate(state)
+    state.checks = valid
+    state.check_proofs = {name: state.check_proofs[name] for name in valid}
+    return valid
+
+
+def remember_approval(run, state, path) -> None:
+    receipt = ReviewReceipt.model_validate_json(Path(path).read_text())
+    state.approval = file_ref(run, path)
+    state.approval_proofs = [file_ref(run, p) for p in receipt.review.artifacts]
+    if isinstance(state.work_item, TicketWorkItem):
+        state.approval_proofs.extend(tickets.verification_artifact(run.repo_root, p)
+            for obligation in receipt.review.required_verification for p in obligation.evidence)
+    save(run, state)
+
+
+def reusable_approval(run, state):
+    if not state.approval:
+        return None
+    try:
+        for ref in [state.approval, *state.approval_proofs]:
+            tickets.verify_ref(run.repo_root, ref)
+        receipt = ReviewReceipt.model_validate_json((run.repo_root / state.approval.path).read_text())
+        from . import gates
+        if not gates.verdict_consistent(receipt.review, run).passed:
+            raise ValueError("cached review no longer passes the current verdict gate")
+        if isinstance(state.work_item, TicketWorkItem) and not gates.verification_artifacts(receipt.review, run).passed:
+            raise ValueError("cached verification evidence no longer passes the current gate")
+        if (receipt.work_item != state.work_item or receipt.prompt != state.prompt
+                or receipt.tree_sha256 != review_routing.verification_fingerprint(run)
+                or receipt.decision.action != "approve"):
+            raise ValueError("approval inputs changed")
+    except (ValueError, OSError):
+        invalidate(state)
+        return None
+    return receipt
+
+
+def remember_draft(run, draft) -> None:
+    state = getattr(run, "active_delivery_checkpoint", None)
+    if state is None:
+        return
+    state.document_draft = draft
+    state.draft_proofs = [file_ref(run, p) for p in
+                         [draft.execution_draft_path, draft.overview_draft_path]]
+    save(run, state)
+
+
+def reusable_document(run, state):
+    if state.document is None or state.document_proof is None:
+        return None
+    tickets.verify_ref(run.repo_root, state.document_proof)
+    return state.document
+
+
+def commit_once(run, state, message: str, paths: list[str]) -> str:
+    """Persist commit intent before execution; recognize success after a lost response."""
+    from . import git_helper
+    head = git_helper.rev("HEAD")
+    if state.commit_sha:
+        if (git_helper.merge_base(state.commit_sha, head) != state.commit_sha
+                or git_helper.rev(state.commit_sha + "^{tree}") != state.commit_tree):
+            raise ValueError("recorded delivery commit differs from the saved intent/history")
+        return state.commit_sha
+    if not state.commit_tree:
+        state.commit_parent = head
+        state.commit_tree = git_helper.planned_tree(paths)
+        save(run, state)
+    if head != state.commit_parent:
+        if (git_helper.rev("HEAD^{tree}") != state.commit_tree
+                or git_helper.rev("HEAD^") != state.commit_parent):
+            raise ValueError("commit outcome differs from the saved intent")
+        state.commit_sha = head
+    else:
+        if git_helper.planned_tree(paths) != state.commit_tree:
+            raise ValueError("commit inputs changed since saved intent")
+        committed = git_helper.commit_paths(message, paths)
+        if git_helper.rev(committed + "^{tree}") != state.commit_tree:
+            raise ValueError("commit hook changed the intended tree")
+        state.commit_sha = committed
+    save(run, state)
+    return state.commit_sha

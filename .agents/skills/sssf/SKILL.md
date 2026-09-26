@@ -133,7 +133,10 @@ occupancy remain unknown when the runtime does not publish authoritative data.
 
 ## Ticket launch preflight
 
-Launch ticket delivery with `--ticket` alone. The host resolves the set and latest
+Launch ticket delivery with `--ticket`; an optional positional prompt supplies extra
+instructions. Prompt is also available with `--spec`, `--resume` and `--retry`.
+For recovery it is appended to the original request, and builder reassesses the
+retained implementation before fresh checks and review. The host resolves the set and latest
 successful current-definition prerequisite receipts; do not manually assemble a
 dependency JSON file. See [ticket contract](references/tickets.md).
 

@@ -73,7 +73,7 @@ before checks/reviewer to assess the evidence supplied for that recheck.
 Shared delivery also owns [explicit recovery](../references/delivery-recovery.md).
 Retain its checkpoints when extending the chain: invalidate completed builder
 state before a repair, preserve consumed budgets and prior review obligations,
-and always reverify before acceptance. Do not add automatic retry in entrypoints
+and validate retained stage inputs/evidence before reuse or acceptance. Do not add automatic retry in entrypoints
 or cache approved verdicts across attempts.
 
 Three distinctions worth keeping straight:

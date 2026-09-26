@@ -240,8 +240,8 @@ descriptions with task-specific intent before relying on the trace.
 | `adw-simple-sdlc` | 规划后进入与 build 相同的完整交付链 |
 
 `adw-build` 与 `adw-simple-sdlc` 共用 `adw_modules/delivery.py`：
-配置预检 → builder → 必跑质量检查 → reviewer → 有限修复与重新验证 → documenter → 提交 → finish。
-票据模式随后签发 `ticket-acceptance.json`，签发失败返回非零退出码。
+配置预检 → builder → 必跑质量检查 → reviewer → 有限修复与重新验证 → documenter → 提交 → 收尾。
+收尾包含文档同步和票据模式的 `ticket-acceptance.json` 签发，全部完成后才记录成功；失败返回非零退出码。
 直接文本请求会原样保存到 `specs/request-<adw_id>/spec.md`，提供稳定的审查和文档目标。
 执行前要求实现工作区干净；已有规格应采用 `specs/<key>/spec.md` 布局。
 
@@ -257,10 +257,12 @@ uv run adws/adw-build.py --resume <原运行ID>
 uv run adws/adw-build.py --retry <原运行ID>
 ```
 
-`--resume` 保留成功完成的 builder 工作；未完成的 builder 或修复会重跑。
-`--retry` 基于已有改动重新执行 builder，并重置修复预算。两者均创建新运行，
-保留旧记录，重新执行质量检查、审查和验收。恢复前核对目标、配置与停止时的
-工作区快照；不会覆盖后来加入的改动。此入口也支持 SDLC 进入共享交付链后的恢复。
+`--resume` 按阶段继续：复用仍匹配的成功检查、评审批准、文档草稿或已发布报告，
+只执行未完成或证据失效的步骤。未完成的 builder 或修复会重跑。提交前记录父提交
+和预期 Git tree，提交成功后丢失响应也不会重复提交实现。
+`--retry` 基于已有改动重新执行 builder 和下游阶段，并重置修复预算。两者均创建
+新运行、保留旧记录。恢复前核对目标、配置与停止时的工作区快照，不会覆盖后来
+加入的改动。此入口也支持 SDLC 进入共享交付链后的恢复。
 旧运行没有检查点、规划阶段失败或强杀后没有终态检查点时，不会推测性续跑。
 安装升级需要合并保留的构建入口，详见 [恢复说明](.agents/skills/sssf/references/delivery-recovery.md)。
 
@@ -387,3 +389,19 @@ uv run adws/adw-simple-sdlc.py "实现登录限流" --spec specs/login-rate-limi
 当前检查、独立 reviewer 和最终集成验收负责验证后续变更。显式 recheck 仍保留针对
 所提供证据的 scout 复核。票据定义、历史记录完整性和必需检查仍受校验。
 重验会更新规格 README、执行记录和索引，并回写本次范围验收结果；成功的票据重验仅提交这些文档，按最终 HEAD 签发票据验收。历史失败记录保留，票据通过不代表整个规格通过。
+
+
+交付目标与附加指令可以同时输入；`prompt` 在所有 build 模式下均可用：
+
+```bash
+uv run adws/adw-build.py "保留公共接口，补充中文说明" --ticket specs/example/spec.tickets/tickets/TICKET-QUERY.md
+uv run adws/adw-build.py "遵循现有错误处理约定" --spec specs/example/spec.md
+uv run adws/adw-build.py "补充边界处理" --resume <source-adw-id>
+uv run adws/adw-build.py "补充边界处理" --retry <source-adw-id>
+```
+
+恢复时附加指令追加到原请求，保留原目标与历史记录，并重新让 builder 检查已有实现。
+不提供附加指令时，恢复行为不变。指令贯穿实现、修复、评审与文档阶段。
+
+
+旧检查点不会补造阶段凭据；只有升级后实际保存过的阶段结果可以复用。
